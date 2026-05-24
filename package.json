@@ -43,6 +43,7 @@
     "cookie-parser": "^1.4.7",
     "ioredis": "^5.9.2",
     "nodemailer": "^7.0.12",
+    "pdf-parse": "^1.1.1",
     "reflect-metadata": "^0.2.2",
     "rxjs": "^7.8.1",
     "socket.io": "^4.8.3"

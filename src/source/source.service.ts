@@ -7,6 +7,7 @@ import { throwError } from 'src/common/utils/helpers';
 import { MulterFile } from 'src/common/types';
 import { StorageService } from 'src/storage/storage.service';
 import { CollaborationGateway } from 'src/collaboration/collaboration.gateway';
+import { DocumentExtractionService } from 'src/document/document-extraction.service';
 import { sourceSelect, SourceSelect } from './queries';
 import { CreateSourceDto, UpdateSourceDto } from './dto';
 
@@ -61,6 +62,7 @@ export class SourceService {
     private readonly prismaService: PrismaService,
     private readonly storageService: StorageService,
     private readonly collaborationGateway: CollaborationGateway,
+    private readonly documentExtractionService: DocumentExtractionService,
   ) {}
 
   private async ensureVaultMember(userId: string, vaultId: string): Promise<{ role: VaultRole }> {
@@ -156,10 +158,43 @@ export class SourceService {
       });
       if (!vault) throw throwError('Vault not found', HttpStatus.NOT_FOUND);
 
+      // 1. Upload file to storage
       const { filename } = await this.storageService.uploadFile(file, SOURCE_UPLOAD_PREFIX);
       const fileUrl = this.storageService.getImageUrl(filename);
       const fileType = mimeToFileType(file.mimetype);
 
+      // 2. Extract text from document (if supported)
+      let extractedText: string | null = null;
+      let extractedMetadata: any = null;
+      let pageCount: number | null = null;
+
+      if (this.documentExtractionService.isSupported(file.mimetype)) {
+        try {
+          this.logger.log(`Extracting text from ${file.mimetype} document`);
+          const extraction = await this.documentExtractionService.extractText(file.buffer, file.mimetype);
+          
+          extractedText = extraction.text;
+          extractedMetadata = extraction.metadata;
+          pageCount = extraction.metadata.pages;
+
+          // Auto-fill title from metadata if not provided
+          if (!dto.title && extraction.metadata.title) {
+            dto.title = extraction.metadata.title;
+          }
+
+          // Auto-fill author from metadata if not provided
+          if ((!dto.authors || dto.authors.length === 0) && extraction.metadata.author) {
+            dto.authors = [extraction.metadata.author];
+          }
+
+          this.logger.log(`Successfully extracted ${extraction.wordCount} words from document`);
+        } catch (error) {
+          this.logger.warn(`Document text extraction failed: ${error.message}`);
+          // Continue without text extraction - not a critical error
+        }
+      }
+
+      // 3. Create File record
       const fileRecord = await this.prismaService.file.create({
         data: {
           vaultId,
@@ -169,9 +204,11 @@ export class SourceService {
           fileSize: file.size,
           fileMimeType: file.mimetype,
           fileType,
+          pageCount,
         },
       });
 
+      // 4. Create Source with extracted text
       const source = await this.prismaService.source.create({
         data: {
           vaultId,
@@ -185,10 +222,14 @@ export class SourceService {
           fileId: fileRecord.id,
           abstract: dto.abstract ?? null,
           keywords: ensureStringArray(dto.keywords),
+          extractedText,
+          extractedMetadata,
+          textExtractedAt: extractedText ? new Date() : null,
         },
         select: sourceSelect,
       });
 
+      // 5. Create audit logs
       await this.prismaService.auditLog.create({
         data: {
           vaultId,
@@ -196,7 +237,11 @@ export class SourceService {
           action: AuditAction.SOURCE_ADDED,
           entityType: 'source',
           entityId: source.id,
-          details: { fileId: fileRecord.id },
+          details: { 
+            fileId: fileRecord.id,
+            textExtracted: !!extractedText,
+            wordCount: extractedText ? extractedText.split(/\s+/).length : 0,
+          },
         },
       });
 

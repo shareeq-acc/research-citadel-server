@@ -5,7 +5,7 @@ import { AppLoggerService } from 'src/common/services/logger.service';
 import { ApiResponse } from 'src/common/types';
 import { throwError } from 'src/common/utils/helpers';
 import { CollaborationGateway } from 'src/collaboration/collaboration.gateway';
-import { GeminiEnhanceService } from './gemini-enhance.service';
+import { MarkdownEnhanceService } from 'src/ai/services/markdown-enhance.service';
 import { annotationSelect, AnnotationSelect } from './queries';
 import { CreateAnnotationDto, UpdateAnnotationDto } from './dto';
 
@@ -16,7 +16,7 @@ export class AnnotationService {
   constructor(
     private readonly prismaService: PrismaService,
     private readonly collaborationGateway: CollaborationGateway,
-    private readonly geminiEnhanceService: GeminiEnhanceService,
+    private readonly markdownEnhanceService: MarkdownEnhanceService,
   ) {}
 
   private async ensureVaultMember(userId: string, vaultId: string): Promise<{ role: VaultRole }> {
@@ -49,7 +49,7 @@ export class AnnotationService {
       where: { id: sourceId, vaultId, deletedAt: null },
     });
     if (!source) throw throwError('Source not found', HttpStatus.NOT_FOUND);
-    const enhancedMarkdown = await this.geminiEnhanceService.enhanceMarkdown(contentMarkdown);
+    const enhancedMarkdown = await this.markdownEnhanceService.enhanceMarkdown(contentMarkdown);
     return {
       message: 'Annotation content enhanced successfully',
       success: true,

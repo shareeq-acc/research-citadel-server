@@ -39,14 +39,14 @@ model User {
   userProfile        UserProfile?        @relation("UserProfile")
 
   // SyncScript Relations
-  ownedVaults       Vault[]           @relation("VaultOwner")
-  vaultMemberships  VaultMember[]
-  uploadedFiles     File[]            @relation("FileUploader")
-  sources           Source[]
-  annotations       Annotation[]
-  auditLogs         AuditLog[]
-  fileLocks         FileLock[]
-  annotationLocks   AnnotationLock[]
+  ownedVaults      Vault[]          @relation("VaultOwner")
+  vaultMemberships VaultMember[]
+  uploadedFiles    File[]           @relation("FileUploader")
+  sources          Source[]
+  annotations      Annotation[]
+  auditLogs        AuditLog[]
+  fileLocks        FileLock[]
+  annotationLocks  AnnotationLock[]
 
   @@index([name])
   @@index([email])
@@ -139,8 +139,8 @@ enum Gender {
 }
 
 model UserProfile {
-  id         String   @id @unique @default(uuid()) @db.Uuid
-  userId     String   @unique @db.Uuid
+  id         String  @id @unique @default(uuid()) @db.Uuid
+  userId     String  @unique @db.Uuid
   longitude  Float?
   latitude   Float?
   age        Int?
@@ -168,7 +168,7 @@ model UserProfile {
 
 enum VaultPrivacy {
   PRIVATE // Only invited members
-  PUBLIC  // Anyone can view (read-only unless invited)
+  PUBLIC // Anyone can view (read-only unless invited)
 }
 
 model Vault {
@@ -186,7 +186,7 @@ model Vault {
   // Relations
   owner     User          @relation("VaultOwner", fields: [ownerId], references: [id], onDelete: Cascade)
   members   VaultMember[]
-  files     File[]        // ← NEW: Files uploaded to this vault
+  files     File[] // ← NEW: Files uploaded to this vault
   sources   Source[]
   tags      VaultTag[]
   auditLogs AuditLog[]
@@ -201,9 +201,9 @@ model Vault {
 // ============================================================================
 
 enum VaultRole {
-  OWNER       // Full control - can delete vault, manage members
+  OWNER // Full control - can delete vault, manage members
   CONTRIBUTOR // Can add/edit sources, annotations, upload files
-  VIEWER      // Read-only access
+  VIEWER // Read-only access
 }
 
 model VaultMember {
@@ -244,14 +244,14 @@ enum FileType {
 }
 
 model File {
-  id         String   @id @unique @default(uuid()) @db.Uuid
-  vaultId    String   @db.Uuid
-  uploadedBy String   @db.Uuid
+  id         String @id @unique @default(uuid()) @db.Uuid
+  vaultId    String @db.Uuid
+  uploadedBy String @db.Uuid
 
   // File metadata
   fileName     String
   fileUrl      String // S3 URL
-  fileSize     Int    // Bytes
+  fileSize     Int // Bytes
   fileMimeType String
   fileType     FileType
 
@@ -279,22 +279,22 @@ model File {
 // ============================================================================
 
 enum SourceType {
-  PDF         // Research paper (can link to uploaded file or external URL)
+  PDF // Research paper (can link to uploaded file or external URL)
   WEB_ARTICLE // Blog post, news article (URL only)
-  DATASET     // GitHub, Kaggle, etc.
-  VIDEO       // YouTube, lecture recordings
-  BOOK        // Book reference
+  DATASET // GitHub, Kaggle, etc.
+  VIDEO // YouTube, lecture recordings
+  BOOK // Book reference
   OTHER
 }
 
 model Source {
-  id         String     @id @unique @default(uuid()) @db.Uuid
-  vaultId    String     @db.Uuid
-  createdBy  String     @db.Uuid
-  
+  id        String @id @unique @default(uuid()) @db.Uuid
+  vaultId   String @db.Uuid
+  createdBy String @db.Uuid
+
   // Core fields
   title       String
-  authors     String[] @default([]) // Array of author names
+  authors     String[]   @default([]) // Array of author names
   publication String? // Journal name, publisher
   year        Int?
   externalUrl String? // Original source URL (arxiv, journal, etc.)
@@ -307,6 +307,16 @@ model Source {
   aiExtracted Boolean  @default(false)
   abstract    String?
   keywords    String[] @default([])
+
+  // Document text extraction (Phase 1)
+  extractedText     String?   @db.Text // Full text content from PDF/DOCX
+  extractedMetadata Json? // Document metadata (author, title, pages, etc.)
+  textExtractedAt   DateTime? // When text was extracted
+
+  // AI-generated content (Phase 2 & 3)
+  aiSummary     String?   @db.Text // AI-generated summary
+  aiInsights    Json? // {methodology, findings, limitations, futureWork}
+  aiProcessedAt DateTime? // When AI processing completed
 
   // Metadata
   createdAt DateTime  @default(now())
@@ -322,6 +332,7 @@ model Source {
   relationships SourceRelationship[] @relation("SourceA")
   relatedFrom   SourceRelationship[] @relation("SourceB")
   citations     CitationReference[]
+  chunks        SourceChunk[] // For RAG (Phase 4)
 
   @@index([vaultId])
   @@index([createdBy])
@@ -336,12 +347,12 @@ model Source {
 // ============================================================================
 
 enum RelationshipType {
-  CITES       // Source A cites Source B
-  CITED_BY    // Reverse of CITES
+  CITES // Source A cites Source B
+  CITED_BY // Reverse of CITES
   CONTRADICTS // Findings contradict
-  SUPPORTS    // Findings support
-  EXTENDS     // Builds upon
-  RELATES_TO  // General relationship
+  SUPPORTS // Findings support
+  EXTENDS // Builds upon
+  RELATES_TO // General relationship
 }
 
 model SourceRelationship {
@@ -367,10 +378,10 @@ model SourceRelationship {
 // ============================================================================
 
 model Annotation {
-  id              String  @id @unique @default(uuid()) @db.Uuid
-  sourceId        String  @db.Uuid
-  vaultId         String  @db.Uuid
-  userId          String  @db.Uuid
+  id       String @id @unique @default(uuid()) @db.Uuid
+  sourceId String @db.Uuid
+  vaultId  String @db.Uuid
+  userId   String @db.Uuid
 
   // Content
   contentMarkdown String @db.Text // Original markdown
@@ -389,8 +400,8 @@ model Annotation {
   deletedAt DateTime? // Soft delete
 
   // Relations
-  source Source            @relation(fields: [sourceId], references: [id], onDelete: Cascade)
-  author User              @relation(fields: [userId], references: [id])
+  source Source           @relation(fields: [sourceId], references: [id], onDelete: Cascade)
+  author User             @relation(fields: [userId], references: [id])
   locks  AnnotationLock[]
 
   @@index([sourceId])
@@ -436,7 +447,7 @@ model CitationReference {
 model VaultTag {
   id      String  @id @unique @default(uuid()) @db.Uuid
   vaultId String  @db.Uuid
-  name    String  // e.g., "AI", "Healthcare", "Ethics"
+  name    String // e.g., "AI", "Healthcare", "Ethics"
   color   String? // Hex color for UI
 
   createdAt DateTime @default(now())
@@ -556,4 +567,30 @@ model AnnotationLock {
 
   @@unique([annotationId]) // Only one lock per annotation
   @@index([expiresAt])
+}
+
+// ============================================================================
+// SOURCE CHUNKS (For RAG - Phase 4)
+// ============================================================================
+
+model SourceChunk {
+  id       String @id @unique @default(uuid()) @db.Uuid
+  sourceId String @db.Uuid
+  vaultId  String @db.Uuid
+
+  chunkText  String @db.Text
+  chunkIndex Int // Order in document
+  pageNumber Int? // Which page this chunk is from
+
+  // Vector embedding for semantic search (Phase 4)
+  // Using pgvector extension: CREATE EXTENSION IF NOT EXISTS vector;
+  // embedding Unsupported("vector(768)")? // Uncomment when pgvector is installed
+
+  createdAt DateTime @default(now())
+
+  source Source @relation(fields: [sourceId], references: [id], onDelete: Cascade)
+
+  @@index([sourceId])
+  @@index([vaultId])
+  @@index([chunkIndex])
 }

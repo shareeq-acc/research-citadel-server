@@ -12,6 +12,8 @@ import { CitationModule } from './citation/citation.module';
 import { MailerModule } from './mailer/mailer.module';
 import { BullMQModule } from './common/modules/bullmq.module';
 import { CollaborationModule } from './collaboration/collaboration.module';
+import { DocumentModule } from './document/document.module';
+import { AiModule } from './ai/ai.module';
 
 @Module({
   imports: [
@@ -28,6 +30,8 @@ import { CollaborationModule } from './collaboration/collaboration.module';
     AnnotationModule,
     CitationModule,
     MailerModule,
+    DocumentModule,
+    AiModule,
   ],
   controllers: [AppController],
   providers: [AppService],
