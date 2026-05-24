@@ -195,4 +195,19 @@ export class SourceController {
   ): Promise<ApiResponse<SourceSelect>> {
     return this.sourceService.extractInsights(user, vaultId, id);
   }
+
+  @Post(':id/process-for-qa')
+  @ApiOperation({
+    summary: 'Process Source for Q&A',
+    description: 'Chunk the source text and generate vector embeddings for semantic search. Required before asking questions about this source. Only CONTRIBUTOR or OWNER can process sources.',
+  })
+  @ApiParam({ name: 'vaultId', type: String, description: 'Vault ID' })
+  @ApiParam({ name: 'id', type: String, description: 'Source ID' })
+  async processForQa(
+    @CurrentUser() user: User,
+    @Param('vaultId') vaultId: string,
+    @Param('id') id: string,
+  ): Promise<ApiResponse<{ sourceId: string; chunksCreated: number }>> {
+    return this.sourceService.processForQa(user, vaultId, id);
+  }
 }

@@ -5,6 +5,7 @@ import { AppLoggerService } from 'src/common/services/logger.service';
 import { ApiResponse } from 'src/common/types';
 import { throwError } from 'src/common/utils/helpers';
 import { CollaborationGateway } from 'src/collaboration/collaboration.gateway';
+import { QaService } from 'src/ai/services/qa.service';
 import { vaultSelect, VaultSelect, VaultWithMyRole, vaultSelectWithMembers, VaultWithMyRoleAndMembers } from './queries';
 import { CreateVaultDto, UpdateVaultDto, AddVaultMemberDto } from './dto';
 import { VaultAuditStatsEntry } from './dto';
@@ -16,6 +17,7 @@ export class VaultService {
   constructor(
     private readonly prismaService: PrismaService,
     private readonly collaborationGateway: CollaborationGateway,
+    private readonly qaService: QaService,
   ) {}
 
   async findAllByUser(user: User): Promise<ApiResponse<VaultWithMyRole[]>> {
@@ -436,6 +438,33 @@ export class VaultService {
       if (err instanceof HttpException) throw err;
       this.logger.error('Failed to get vault audit stats', (err as Error)?.stack, VaultService.name);
       throw throwError((err as Error)?.message || 'Failed to get vault audit stats', HttpStatus.INTERNAL_SERVER_ERROR);
+    }
+  }
+
+  async askQuestion(
+    user: User,
+    vaultId: string,
+    question: string,
+    sourceIds?: string[],
+  ): Promise<ApiResponse<import('src/ai/dto/qa.dto').QaAnswerDto>> {
+    try {
+      // Any vault member can ask questions
+      const member = await this.prismaService.vaultMember.findUnique({
+        where: { vaultId_userId: { vaultId, userId: user.id } },
+      });
+      if (!member) throw throwError('Vault not found or access denied', HttpStatus.NOT_FOUND);
+
+      const answer = await this.qaService.answerQuestion(vaultId, question, sourceIds);
+
+      return {
+        message: 'Question answered successfully',
+        success: true,
+        data: answer,
+      };
+    } catch (err: unknown) {
+      if (err instanceof HttpException) throw err;
+      this.logger.error('Failed to answer question', (err as Error)?.stack, VaultService.name);
+      throw throwError((err as Error)?.message || 'Failed to answer question', HttpStatus.INTERNAL_SERVER_ERROR);
     }
   }
 }

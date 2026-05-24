@@ -582,9 +582,8 @@ model SourceChunk {
   chunkIndex Int // Order in document
   pageNumber Int? // Which page this chunk is from
 
-  // Vector embedding for semantic search (Phase 4)
-  // Using pgvector extension: CREATE EXTENSION IF NOT EXISTS vector;
-  // embedding Unsupported("vector(768)")? // Uncomment when pgvector is installed
+  // Vector embedding stored as JSON array of floats for semantic search
+  embedding Json? // float[] from text-embedding-004 (768 dimensions)
 
   createdAt DateTime @default(now())
 

@@ -10,6 +10,7 @@ import { CollaborationGateway } from 'src/collaboration/collaboration.gateway';
 import { DocumentExtractionService } from 'src/document/document-extraction.service';
 import { SummarizationService } from 'src/ai/services/summarization.service';
 import { InsightsService } from 'src/ai/services/insights.service';
+import { ChunkingService } from 'src/document/chunking.service';
 import { SummaryLength } from 'src/ai/dto/summarization.dto';
 import { sourceSelect, SourceSelect } from './queries';
 import { CreateSourceDto, UpdateSourceDto } from './dto';
@@ -68,6 +69,7 @@ export class SourceService {
     private readonly documentExtractionService: DocumentExtractionService,
     private readonly summarizationService: SummarizationService,
     private readonly insightsService: InsightsService,
+    private readonly chunkingService: ChunkingService,
   ) {}
 
   private async ensureVaultMember(userId: string, vaultId: string): Promise<{ role: VaultRole }> {
@@ -630,6 +632,81 @@ export class SourceService {
         userId: user.id,
       });
       throw throwError(err.message || 'Failed to extract insights', err.status || HttpStatus.INTERNAL_SERVER_ERROR);
+    }
+  }
+
+  async processForQa(
+    user: User,
+    vaultId: string,
+    sourceId: string,
+  ): Promise<ApiResponse<{ sourceId: string; chunksCreated: number }>> {
+    try {
+      await this.ensureCanEditSource(user.id, vaultId);
+
+      const source = await this.prismaService.source.findFirst({
+        where: { id: sourceId, vaultId, deletedAt: null },
+      });
+      if (!source) throw throwError('Source not found', HttpStatus.NOT_FOUND);
+
+      if (!source.extractedText?.trim()) {
+        throw throwError(
+          'Cannot process for Q&A: No extracted text available. Please upload a document first.',
+          HttpStatus.BAD_REQUEST,
+        );
+      }
+
+      this.logger.log(`Processing source ${sourceId} for Q&A`);
+
+      // 1. Delete existing chunks for this source (re-processing)
+      await this.prismaService.sourceChunk.deleteMany({ where: { sourceId } });
+
+      // 2. Split text into chunks
+      const chunks = this.chunkingService.chunkText(source.extractedText);
+      this.logger.log(`Created ${chunks.length} chunks for source ${sourceId}`);
+
+      // 3. Persist all chunks (no embedding API calls — retrieval uses TF-IDF)
+      await this.prismaService.$transaction(
+        chunks.map((chunk) =>
+          this.prismaService.sourceChunk.create({
+            data: {
+              sourceId,
+              vaultId,
+              chunkText: chunk.text,
+              chunkIndex: chunk.index,
+            },
+          }),
+        ),
+      );
+
+      const chunksCreated = chunks.length;
+
+      await this.prismaService.auditLog.create({
+        data: {
+          vaultId,
+          userId: user.id,
+          action: AuditAction.SOURCE_UPDATED,
+          entityType: 'source',
+          entityId: sourceId,
+          details: { action: 'qa_processing_complete', chunksCreated },
+        },
+      });
+
+      return {
+        message: `Source processed for Q&A: ${chunksCreated} chunks created`,
+        success: true,
+        data: { sourceId, chunksCreated },
+      };
+    } catch (err) {
+      this.logger.error('Failed to process source for Q&A', err.stack, SourceService.name);
+      this.logger.logData({
+        error: err.message,
+        status: err.status || HttpStatus.INTERNAL_SERVER_ERROR,
+        method: 'processForQa',
+        vaultId,
+        sourceId,
+        userId: user.id,
+      });
+      throw throwError(err.message || 'Failed to process source for Q&A', err.status || HttpStatus.INTERNAL_SERVER_ERROR);
     }
   }
 }

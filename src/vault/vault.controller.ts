@@ -1,5 +1,5 @@
 import { Body, Controller, Delete, Get, Param, ParseUUIDPipe, Post, Put, Query, UseGuards } from '@nestjs/common';
-import { ApiBearerAuth, ApiOperation, ApiParam, ApiQuery, ApiResponse as ApiResponseDoc, ApiTags } from '@nestjs/swagger';
+import { ApiBearerAuth, ApiBody, ApiOperation, ApiParam, ApiQuery, ApiResponse as ApiResponseDoc, ApiTags } from '@nestjs/swagger';
 import { AuthGuard } from 'src/common/guards/auth.guard';
 import { VaultService } from './vault.service';
 import { User } from '@prisma/client';
@@ -7,6 +7,7 @@ import { CurrentUser } from 'src/common/decorators/current-user.decorator';
 import { ApiResponse } from 'src/common/types';
 import { CreateVaultDto, UpdateVaultDto, AddVaultMemberDto, AuditLogResponseDto, AUDIT_ACTIONS, UserContributionStatsDto } from './dto';
 import { VaultSelect, VaultWithMyRole, VaultWithMyRoleAndMembers } from './queries';
+import { AskQuestionDto, QaAnswerDto } from 'src/ai/dto/qa.dto';
 
 @Controller('vault')
 @ApiTags('Vault')
@@ -129,5 +130,20 @@ export class VaultController {
     @Body() addVaultMemberDto: AddVaultMemberDto,
   ): Promise<ApiResponse<{ vaultId: string; userId: string; role: string }>> {
     return this.vaultService.addMember(user, id, addVaultMemberDto);
+  }
+
+  @Post(':id/ask')
+  @ApiOperation({
+    summary: 'Ask a Question (RAG)',
+    description: 'Ask a question about the sources in this vault using semantic search and AI. Sources must be processed for Q&A first. All vault members can ask questions.',
+  })
+  @ApiParam({ name: 'id', type: String, description: 'Vault UUID' })
+  @ApiBody({ type: AskQuestionDto })
+  async askQuestion(
+    @CurrentUser() user: User,
+    @Param('id', new ParseUUIDPipe({ version: '4' })) id: string,
+    @Body() dto: AskQuestionDto,
+  ): Promise<ApiResponse<QaAnswerDto>> {
+    return this.vaultService.askQuestion(user, id, dto.question, dto.sourceIds);
   }
 }
