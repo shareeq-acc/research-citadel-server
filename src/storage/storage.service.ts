@@ -3,6 +3,8 @@ import { ConfigService } from '@nestjs/config';
 import { MulterFile } from 'src/common/types';
 import { DeleteObjectCommand, PutObjectCommand, S3Client } from '@aws-sdk/client-s3';
 import { getRandomFileName } from 'src/common/utils/helpers';
+import { NodeHttpHandler } from '@smithy/node-http-handler';
+import https from 'https';
 
 @Injectable()
 export class StorageService {
@@ -39,6 +41,15 @@ export class StorageService {
         accessKeyId: this.accessKeyId,
         secretAccessKey: this.secretAccessKey,
       },
+      forcePathStyle: true, // Required for R2
+      requestHandler: new NodeHttpHandler({
+        httpsAgent: new https.Agent({
+          keepAlive: true,
+          maxSockets: 50,
+          rejectUnauthorized: true,
+          minVersion: 'TLSv1.2',
+        }),
+      }),
     });
   }
 
