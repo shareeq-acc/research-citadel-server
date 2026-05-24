@@ -1,0 +1,559 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+// ============================================================================
+// EXISTING USER MODELS (Keep as is)
+// ============================================================================
+
+enum LoginProvider {
+  EMAIL
+  GOOGLE
+}
+
+model User {
+  id            String        @id @unique @default(uuid()) @db.Uuid
+  name          String
+  email         String        @unique
+  avatar        String?
+  password      String?
+  salt          String?
+  loginProvider LoginProvider @default(EMAIL)
+
+  hasNotifications Boolean @default(false)
+  isEmailVerified  Boolean @default(false)
+
+  lastLoginAt  DateTime?
+  lastActiveAt DateTime?
+
+  deletedAt DateTime?
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+
+  otpVerifications   OtpVerification[]
+  verificationTokens VerificationToken[]
+  userProfile        UserProfile?        @relation("UserProfile")
+
+  // SyncScript Relations
+  ownedVaults       Vault[]           @relation("VaultOwner")
+  vaultMemberships  VaultMember[]
+  uploadedFiles     File[]            @relation("FileUploader")
+  sources           Source[]
+  annotations       Annotation[]
+  auditLogs         AuditLog[]
+  fileLocks         FileLock[]
+  annotationLocks   AnnotationLock[]
+
+  @@index([name])
+  @@index([email])
+}
+
+enum OtpType {
+  EMAIL_VERIFICATION
+  PHONE_VERIFICATION
+  PASSWORD_RESET
+  LOGIN_VERIFICATION
+  TWO_FACTOR_AUTH
+}
+
+enum OtpChannel {
+  EMAIL
+  SMS
+}
+
+model OtpVerification {
+  id      String     @id @unique @default(uuid()) @db.Uuid
+  userId  String     @db.Uuid
+  code    String
+  type    OtpType
+  channel OtpChannel @default(EMAIL)
+
+  expiresAt   DateTime
+  verified    Boolean  @default(false)
+  attempts    Int      @default(0)
+  maxAttempts Int      @default(3)
+
+  ipAddress String?
+  userAgent String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, type])
+  @@index([expiresAt])
+  @@index([createdAt])
+}
+
+model RateLimit {
+  id          String          @id @unique @default(uuid()) @db.Uuid
+  identifier  String
+  action      RateLimitAction
+  count       Int             @default(1)
+  windowStart DateTime        @default(now())
+  expiresAt   DateTime
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([identifier, action])
+  @@index([identifier, action])
+  @@index([expiresAt])
+}
+
+enum RateLimitAction {
+  SEND_OTP
+  VERIFY_OTP
+  RESET_PASSWORD
+  LOGIN_VERIFICATION
+  TWO_FACTOR_AUTH
+  FILE_UPLOAD
+  SOURCE_CREATE
+}
+
+model VerificationToken {
+  id        String   @id @unique @default(uuid()) @db.Uuid
+  userId    String   @db.Uuid
+  token     String   @unique
+  used      Boolean  @default(false)
+  type      OtpType
+  expiresAt DateTime
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+}
+
+enum Gender {
+  MALE
+  FEMALE
+  OTHER
+}
+
+model UserProfile {
+  id         String   @id @unique @default(uuid()) @db.Uuid
+  userId     String   @unique @db.Uuid
+  longitude  Float?
+  latitude   Float?
+  age        Int?
+  gender     Gender?
+  address    String?
+  city       String?
+  state      String?
+  country    String?
+  postalCode String?
+  phone      String?
+  website    String?
+  bio        String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  user User @relation("UserProfile", fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+}
+
+// ============================================================================
+// VAULT MODELS
+// ============================================================================
+
+enum VaultPrivacy {
+  PRIVATE // Only invited members
+  PUBLIC  // Anyone can view (read-only unless invited)
+}
+
+model Vault {
+  id          String       @id @unique @default(uuid()) @db.Uuid
+  name        String
+  description String?
+  privacy     VaultPrivacy @default(PRIVATE)
+  ownerId     String       @db.Uuid
+
+  // Metadata
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime? // Soft delete
+
+  // Relations
+  owner     User          @relation("VaultOwner", fields: [ownerId], references: [id], onDelete: Cascade)
+  members   VaultMember[]
+  files     File[]        // ← NEW: Files uploaded to this vault
+  sources   Source[]
+  tags      VaultTag[]
+  auditLogs AuditLog[]
+
+  @@index([ownerId])
+  @@index([createdAt])
+  @@index([name])
+}
+
+// ============================================================================
+// VAULT MEMBERS & PERMISSIONS (RBAC)
+// ============================================================================
+
+enum VaultRole {
+  OWNER       // Full control - can delete vault, manage members
+  CONTRIBUTOR // Can add/edit sources, annotations, upload files
+  VIEWER      // Read-only access
+}
+
+model VaultMember {
+  id      String    @id @unique @default(uuid()) @db.Uuid
+  vaultId String    @db.Uuid
+  userId  String    @db.Uuid
+  role    VaultRole
+
+  // Invitation tracking
+  invitedBy  String?   @db.Uuid
+  invitedAt  DateTime  @default(now())
+  acceptedAt DateTime? // Null if invitation pending
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Relations
+  vault Vault @relation(fields: [vaultId], references: [id], onDelete: Cascade)
+  user  User  @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([vaultId, userId]) // One role per user per vault
+  @@index([vaultId])
+  @@index([userId])
+  @@index([role])
+}
+
+// ============================================================================
+// FILES (Uploaded to Vault - Can be linked to sources)
+// ============================================================================
+
+enum FileType {
+  PDF
+  DOCX
+  IMAGE
+  VIDEO
+  DATASET
+  OTHER
+}
+
+model File {
+  id         String   @id @unique @default(uuid()) @db.Uuid
+  vaultId    String   @db.Uuid
+  uploadedBy String   @db.Uuid
+
+  // File metadata
+  fileName     String
+  fileUrl      String // S3 URL
+  fileSize     Int    // Bytes
+  fileMimeType String
+  fileType     FileType
+
+  // PDF-specific metadata
+  pageCount Int? // For PDFs
+
+  // Metadata
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime? // Soft delete
+
+  // Relations
+  vault    Vault    @relation(fields: [vaultId], references: [id], onDelete: Cascade)
+  uploader User     @relation("FileUploader", fields: [uploadedBy], references: [id])
+  sources  Source[] // ← Sources that link to this file
+
+  @@index([vaultId])
+  @@index([uploadedBy])
+  @@index([fileType])
+  @@index([createdAt])
+}
+
+// ============================================================================
+// SOURCES (Research Papers, URLs, Datasets - Can link to uploaded files)
+// ============================================================================
+
+enum SourceType {
+  PDF         // Research paper (can link to uploaded file or external URL)
+  WEB_ARTICLE // Blog post, news article (URL only)
+  DATASET     // GitHub, Kaggle, etc.
+  VIDEO       // YouTube, lecture recordings
+  BOOK        // Book reference
+  OTHER
+}
+
+model Source {
+  id         String     @id @unique @default(uuid()) @db.Uuid
+  vaultId    String     @db.Uuid
+  createdBy  String     @db.Uuid
+  
+  // Core fields
+  title       String
+  authors     String[] @default([]) // Array of author names
+  publication String? // Journal name, publisher
+  year        Int?
+  externalUrl String? // Original source URL (arxiv, journal, etc.)
+  sourceType  SourceType @default(PDF)
+
+  // File linkage (optional - links to uploaded file in vault)
+  fileId String? @db.Uuid
+
+  // AI-extracted metadata (optional bonus feature)
+  aiExtracted Boolean  @default(false)
+  abstract    String?
+  keywords    String[] @default([])
+
+  // Metadata
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime? // Soft delete
+
+  // Relations
+  vault         Vault                @relation(fields: [vaultId], references: [id], onDelete: Cascade)
+  creator       User                 @relation(fields: [createdBy], references: [id])
+  file          File?                @relation(fields: [fileId], references: [id], onDelete: SetNull) // ← Optional file link
+  annotations   Annotation[]
+  tags          SourceTag[]
+  relationships SourceRelationship[] @relation("SourceA")
+  relatedFrom   SourceRelationship[] @relation("SourceB")
+  citations     CitationReference[]
+
+  @@index([vaultId])
+  @@index([createdBy])
+  @@index([fileId])
+  @@index([sourceType])
+  @@index([createdAt])
+  @@index([title])
+}
+
+// ============================================================================
+// SOURCE RELATIONSHIPS (Cross-referencing)
+// ============================================================================
+
+enum RelationshipType {
+  CITES       // Source A cites Source B
+  CITED_BY    // Reverse of CITES
+  CONTRADICTS // Findings contradict
+  SUPPORTS    // Findings support
+  EXTENDS     // Builds upon
+  RELATES_TO  // General relationship
+}
+
+model SourceRelationship {
+  id           String           @id @unique @default(uuid()) @db.Uuid
+  sourceAId    String           @db.Uuid
+  sourceBId    String           @db.Uuid
+  relationship RelationshipType
+  createdBy    String           @db.Uuid
+  notes        String? // Optional explanation
+
+  createdAt DateTime @default(now())
+
+  sourceA Source @relation("SourceA", fields: [sourceAId], references: [id], onDelete: Cascade)
+  sourceB Source @relation("SourceB", fields: [sourceBId], references: [id], onDelete: Cascade)
+
+  @@unique([sourceAId, sourceBId, relationship]) // Prevent duplicate relationships
+  @@index([sourceAId])
+  @@index([sourceBId])
+}
+
+// ============================================================================
+// ANNOTATIONS (Collaborative Notes)
+// ============================================================================
+
+model Annotation {
+  id              String  @id @unique @default(uuid()) @db.Uuid
+  sourceId        String  @db.Uuid
+  vaultId         String  @db.Uuid
+  userId          String  @db.Uuid
+
+  // Content
+  contentMarkdown String @db.Text // Original markdown
+  contentHtml     String @db.Text // Rendered HTML (cached)
+
+  // Location references (for PDFs)
+  pageReference    Int? // Which page
+  sectionReference String? // Which section/chapter
+
+  // Versioning for conflict resolution
+  version Int @default(1)
+
+  // Metadata
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime? // Soft delete
+
+  // Relations
+  source Source            @relation(fields: [sourceId], references: [id], onDelete: Cascade)
+  author User              @relation(fields: [userId], references: [id])
+  locks  AnnotationLock[]
+
+  @@index([sourceId])
+  @@index([vaultId])
+  @@index([userId])
+  @@index([createdAt])
+  @@index([pageReference])
+}
+
+// ============================================================================
+// CITATIONS (Auto-generated bibliography entries)
+// ============================================================================
+
+enum CitationFormat {
+  APA
+  MLA
+  CHICAGO
+  HARVARD
+  IEEE
+  BIBTEX
+}
+
+model CitationReference {
+  id       String         @id @unique @default(uuid()) @db.Uuid
+  sourceId String         @db.Uuid
+  format   CitationFormat
+  citation String         @db.Text // Formatted citation string
+
+  // Cache metadata
+  generatedAt DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  source Source @relation(fields: [sourceId], references: [id], onDelete: Cascade)
+
+  @@unique([sourceId, format]) // One citation per format per source
+  @@index([sourceId])
+}
+
+// ============================================================================
+// TAGS (Organizing sources and vaults)
+// ============================================================================
+
+model VaultTag {
+  id      String  @id @unique @default(uuid()) @db.Uuid
+  vaultId String  @db.Uuid
+  name    String  // e.g., "AI", "Healthcare", "Ethics"
+  color   String? // Hex color for UI
+
+  createdAt DateTime @default(now())
+
+  vault Vault @relation(fields: [vaultId], references: [id], onDelete: Cascade)
+
+  @@unique([vaultId, name]) // No duplicate tags in same vault
+  @@index([vaultId])
+}
+
+model SourceTag {
+  id       String  @id @unique @default(uuid()) @db.Uuid
+  sourceId String  @db.Uuid
+  name     String
+  color    String?
+
+  createdAt DateTime @default(now())
+
+  source Source @relation(fields: [sourceId], references: [id], onDelete: Cascade)
+
+  @@unique([sourceId, name])
+  @@index([sourceId])
+}
+
+// ============================================================================
+// AUDIT LOGS (Immutable change tracking)
+// ============================================================================
+
+enum AuditAction {
+  // Vault actions
+  VAULT_CREATED
+  VAULT_UPDATED
+  VAULT_DELETED
+
+  // Member actions
+  MEMBER_ADDED
+  MEMBER_REMOVED
+  MEMBER_ROLE_CHANGED
+
+  // File actions
+  FILE_UPLOADED
+  FILE_DELETED
+
+  // Source actions
+  SOURCE_ADDED
+  SOURCE_UPDATED
+  SOURCE_DELETED
+
+  // Annotation actions
+  ANNOTATION_ADDED
+  ANNOTATION_UPDATED
+  ANNOTATION_DELETED
+
+  // Relationship actions
+  RELATIONSHIP_CREATED
+  RELATIONSHIP_DELETED
+}
+
+model AuditLog {
+  id      String      @id @unique @default(uuid()) @db.Uuid
+  vaultId String      @db.Uuid
+  userId  String      @db.Uuid
+  action  AuditAction
+
+  // Flexible metadata storage
+  entityType String? // "source", "annotation", "member", "file", etc.
+  entityId   String? @db.Uuid
+  details    Json? // Additional context (old/new values, etc.)
+
+  // IP and user agent for security
+  ipAddress String?
+  userAgent String?
+
+  createdAt DateTime @default(now())
+
+  vault Vault @relation(fields: [vaultId], references: [id], onDelete: Cascade)
+  user  User  @relation(fields: [userId], references: [id])
+
+  @@index([vaultId])
+  @@index([userId])
+  @@index([action])
+  @@index([createdAt])
+  @@index([entityType, entityId])
+}
+
+// ============================================================================
+// REAL-TIME COLLABORATION LOCKS
+// ============================================================================
+
+// File upload locks (prevent concurrent uploads of same file)
+model FileLock {
+  id       String @id @unique @default(uuid()) @db.Uuid
+  vaultId  String @db.Uuid
+  fileName String
+  lockedBy String @db.Uuid
+
+  createdAt DateTime @default(now())
+  expiresAt DateTime // Auto-expire after 5 minutes
+
+  user User @relation(fields: [lockedBy], references: [id], onDelete: Cascade)
+
+  @@unique([vaultId, fileName])
+  @@index([expiresAt])
+}
+
+// Annotation edit locks (prevent concurrent edits)
+model AnnotationLock {
+  id           String @id @unique @default(uuid()) @db.Uuid
+  annotationId String @db.Uuid
+  lockedBy     String @db.Uuid
+
+  createdAt DateTime @default(now())
+  expiresAt DateTime // Auto-expire after 5 minutes
+
+  annotation Annotation @relation(fields: [annotationId], references: [id], onDelete: Cascade)
+  user       User       @relation(fields: [lockedBy], references: [id], onDelete: Cascade)
+
+  @@unique([annotationId]) // Only one lock per annotation
+  @@index([expiresAt])
+}
