@@ -9,6 +9,7 @@ import { StorageService } from 'src/storage/storage.service';
 import { CollaborationGateway } from 'src/collaboration/collaboration.gateway';
 import { DocumentExtractionService } from 'src/document/document-extraction.service';
 import { SummarizationService } from 'src/ai/services/summarization.service';
+import { InsightsService } from 'src/ai/services/insights.service';
 import { SummaryLength } from 'src/ai/dto/summarization.dto';
 import { sourceSelect, SourceSelect } from './queries';
 import { CreateSourceDto, UpdateSourceDto } from './dto';
@@ -66,6 +67,7 @@ export class SourceService {
     private readonly collaborationGateway: CollaborationGateway,
     private readonly documentExtractionService: DocumentExtractionService,
     private readonly summarizationService: SummarizationService,
+    private readonly insightsService: InsightsService,
   ) {}
 
   private async ensureVaultMember(userId: string, vaultId: string): Promise<{ role: VaultRole }> {
@@ -554,6 +556,80 @@ export class SourceService {
         userId: user.id,
       });
       throw throwError(err.message || 'Failed to generate summary', err.status || HttpStatus.INTERNAL_SERVER_ERROR);
+    }
+  }
+
+  async extractInsights(
+    user: User,
+    vaultId: string,
+    sourceId: string,
+  ): Promise<ApiResponse<SourceSelect>> {
+    try {
+      await this.ensureCanEditSource(user.id, vaultId);
+
+      const source = await this.prismaService.source.findFirst({
+        where: { id: sourceId, vaultId, deletedAt: null },
+      });
+      if (!source) throw throwError('Source not found', HttpStatus.NOT_FOUND);
+
+      if (!source.extractedText?.trim()) {
+        throw throwError(
+          'Cannot extract insights: No extracted text available. Please upload a document first.',
+          HttpStatus.BAD_REQUEST,
+        );
+      }
+
+      this.logger.log(`Extracting insights for source ${sourceId}`);
+
+      const insights = await this.insightsService.extractInsights(source.extractedText, {
+        title: source.title,
+        authors: source.authors,
+        year: source.year ?? undefined,
+      });
+
+      const updated = await this.prismaService.source.update({
+        where: { id: sourceId },
+        data: {
+          aiInsights: insights as any,
+          aiProcessedAt: new Date(),
+        },
+        select: sourceSelect,
+      });
+
+      await this.prismaService.auditLog.create({
+        data: {
+          vaultId,
+          userId: user.id,
+          action: AuditAction.SOURCE_UPDATED,
+          entityType: 'source',
+          entityId: sourceId,
+          details: {
+            action: 'ai_insights_extracted',
+            findingsCount: insights.keyFindings.length,
+            limitationsCount: insights.limitations.length,
+            contributionsCount: insights.contributions.length,
+          },
+        },
+      });
+
+      this.collaborationGateway.emitSourceUpdated(vaultId, updated);
+
+      return {
+        message: 'Insights extracted successfully',
+        success: true,
+        data: updated,
+      };
+    } catch (err) {
+      this.logger.error('Failed to extract insights', err.stack, SourceService.name);
+      this.logger.logData({
+        error: err.message,
+        status: err.status || HttpStatus.INTERNAL_SERVER_ERROR,
+        method: 'extractInsights',
+        vaultId,
+        sourceId,
+        userId: user.id,
+      });
+      throw throwError(err.message || 'Failed to extract insights', err.status || HttpStatus.INTERNAL_SERVER_ERROR);
     }
   }
 }

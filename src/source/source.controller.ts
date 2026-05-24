@@ -180,4 +180,19 @@ export class SourceController {
   ): Promise<ApiResponse<SourceSelect>> {
     return this.sourceService.generateSummary(user, vaultId, id, body.length);
   }
+
+  @Post(':id/extract-insights')
+  @ApiOperation({
+    summary: 'Extract AI Insights',
+    description: 'Extract structured insights from the source document: research problem, methodology, key findings, limitations, future work, contributions, and datasets. Only CONTRIBUTOR or OWNER can extract insights.',
+  })
+  @ApiParam({ name: 'vaultId', type: String, description: 'Vault ID' })
+  @ApiParam({ name: 'id', type: String, description: 'Source ID' })
+  async extractInsights(
+    @CurrentUser() user: User,
+    @Param('vaultId') vaultId: string,
+    @Param('id') id: string,
+  ): Promise<ApiResponse<SourceSelect>> {
+    return this.sourceService.extractInsights(user, vaultId, id);
+  }
 }
