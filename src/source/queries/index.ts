@@ -12,6 +12,12 @@ export const sourceSelect = {
   aiExtracted: true,
   abstract: true,
   keywords: true,
+  extractedText: true,
+  extractedMetadata: true,
+  textExtractedAt: true,
+  aiSummary: true,
+  aiInsights: true,
+  aiProcessedAt: true,
   createdAt: true,
   updatedAt: true,
   deletedAt: true,
@@ -50,6 +56,12 @@ export type SourceSelect = {
   aiExtracted: boolean;
   abstract: string | null;
   keywords: string[];
+  extractedText: string | null;
+  extractedMetadata: any;
+  textExtractedAt: Date | null;
+  aiSummary: string | null;
+  aiInsights: any;
+  aiProcessedAt: Date | null;
   createdAt: Date;
   updatedAt: Date;
   deletedAt: Date | null;

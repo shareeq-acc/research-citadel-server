@@ -150,4 +150,34 @@ export class SourceController {
   ): Promise<ApiResponse<{ id: string }>> {
     return this.sourceService.remove(user, vaultId, id);
   }
+
+  @Post(':id/summarize')
+  @ApiOperation({
+    summary: 'Generate AI Summary',
+    description: 'Generate an AI-powered summary of the source document. Requires extracted text from the document. Only CONTRIBUTOR or OWNER can generate summaries.',
+  })
+  @ApiParam({ name: 'vaultId', type: String, description: 'Vault ID' })
+  @ApiParam({ name: 'id', type: String, description: 'Source ID' })
+  @ApiBody({
+    description: 'Summary generation options',
+    schema: {
+      type: 'object',
+      properties: {
+        length: {
+          type: 'string',
+          enum: ['short', 'medium', 'long'],
+          default: 'medium',
+          description: 'Desired summary length: short (100-150 words), medium (250-350 words), long (500-700 words)',
+        },
+      },
+    },
+  })
+  async generateSummary(
+    @CurrentUser() user: User,
+    @Param('vaultId') vaultId: string,
+    @Param('id') id: string,
+    @Body() body: { length?: 'short' | 'medium' | 'long' },
+  ): Promise<ApiResponse<SourceSelect>> {
+    return this.sourceService.generateSummary(user, vaultId, id, body.length);
+  }
 }

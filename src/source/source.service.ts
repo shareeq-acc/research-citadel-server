@@ -8,6 +8,8 @@ import { MulterFile } from 'src/common/types';
 import { StorageService } from 'src/storage/storage.service';
 import { CollaborationGateway } from 'src/collaboration/collaboration.gateway';
 import { DocumentExtractionService } from 'src/document/document-extraction.service';
+import { SummarizationService } from 'src/ai/services/summarization.service';
+import { SummaryLength } from 'src/ai/dto/summarization.dto';
 import { sourceSelect, SourceSelect } from './queries';
 import { CreateSourceDto, UpdateSourceDto } from './dto';
 
@@ -63,6 +65,7 @@ export class SourceService {
     private readonly storageService: StorageService,
     private readonly collaborationGateway: CollaborationGateway,
     private readonly documentExtractionService: DocumentExtractionService,
+    private readonly summarizationService: SummarizationService,
   ) {}
 
   private async ensureVaultMember(userId: string, vaultId: string): Promise<{ role: VaultRole }> {
@@ -465,6 +468,92 @@ export class SourceService {
         userId: user.id,
       });
       throw throwError(err.message || 'Failed to delete source', err.status || HttpStatus.INTERNAL_SERVER_ERROR);
+    }
+  }
+
+  async generateSummary(
+    user: User,
+    vaultId: string,
+    sourceId: string,
+    length?: 'short' | 'medium' | 'long',
+  ): Promise<ApiResponse<SourceSelect>> {
+    try {
+      await this.ensureCanEditSource(user.id, vaultId);
+
+      // Fetch the source
+      const source = await this.prismaService.source.findFirst({
+        where: { id: sourceId, vaultId, deletedAt: null },
+      });
+      if (!source) throw throwError('Source not found', HttpStatus.NOT_FOUND);
+
+      // Check if text has been extracted
+      if (!source.extractedText || source.extractedText.trim().length === 0) {
+        throw throwError(
+          'Cannot generate summary: No extracted text available. Please upload a document first.',
+          HttpStatus.BAD_REQUEST,
+        );
+      }
+
+      // Determine summary length
+      const summaryLength = (length || 'medium') as SummaryLength;
+      
+      this.logger.log(`Generating ${summaryLength} summary for source ${sourceId}`);
+
+      // Generate summary using AI
+      const summary = await this.summarizationService.generateSummary(
+        source.extractedText,
+        summaryLength,
+        {
+          title: source.title,
+          authors: source.authors,
+          year: source.year ?? undefined,
+        },
+      );
+
+      // Update source with summary
+      const updated = await this.prismaService.source.update({
+        where: { id: sourceId },
+        data: {
+          aiSummary: summary,
+          aiProcessedAt: new Date(),
+        },
+        select: sourceSelect,
+      });
+
+      // Create audit log
+      await this.prismaService.auditLog.create({
+        data: {
+          vaultId,
+          userId: user.id,
+          action: AuditAction.SOURCE_UPDATED,
+          entityType: 'source',
+          entityId: sourceId,
+          details: {
+            action: 'ai_summary_generated',
+            summaryLength,
+            wordCount: this.summarizationService.estimateWordCount(summary),
+          },
+        },
+      });
+
+      this.collaborationGateway.emitSourceUpdated(vaultId, updated);
+
+      return {
+        message: 'Summary generated successfully',
+        success: true,
+        data: updated,
+      };
+    } catch (err) {
+      this.logger.error('Failed to generate summary', err.stack, SourceService.name);
+      this.logger.logData({
+        error: err.message,
+        status: err.status || HttpStatus.INTERNAL_SERVER_ERROR,
+        method: 'generateSummary',
+        vaultId,
+        sourceId,
+        userId: user.id,
+      });
+      throw throwError(err.message || 'Failed to generate summary', err.status || HttpStatus.INTERNAL_SERVER_ERROR);
     }
   }
 }
