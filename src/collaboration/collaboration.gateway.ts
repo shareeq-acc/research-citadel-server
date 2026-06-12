@@ -54,6 +54,11 @@ const editorsByAnnotation = new Map<string, Map<string, string>>();
 /** Socket id -> { vaultId, annotationId, userId } so we can clean up on disconnect */
 const socketEditing = new Map<string, { vaultId: string; annotationId: string; userId: string }>();
 
+/** Viewers: annotationId -> (userId -> name) */
+const viewersByAnnotation = new Map<string, Map<string, string>>();
+/** Socket id -> viewing info for disconnect cleanup */
+const socketViewing = new Map<string, { vaultId: string; annotationId: string; userId: string }>();
+
 @WebSocketGateway({
   namespace: COLLABORATION_NAMESPACE,
   cors: { origin: true },
@@ -86,18 +91,33 @@ export class CollaborationGateway
       this.removeEditor(editing.vaultId, editing.annotationId, editing.userId, client.id);
     }
     socketEditing.delete(client.id);
-    this.logger.log(
-      `Client disconnected: ${client.id}`,
-      CollaborationGateway.name,
-    );
+
+    const viewing = socketViewing.get(client.id);
+    if (viewing) {
+      this.removeViewer(viewing.vaultId, viewing.annotationId, viewing.userId, client.id);
+    }
+    socketViewing.delete(client.id);
+
+    this.logger.log(`Client disconnected: ${client.id}`, CollaborationGateway.name);
   }
 
   private broadcastEditors(vaultId: string, annotationId: string): void {
     const editorsMap = editorsByAnnotation.get(annotationId);
     const editors = editorsMap
-      ? Array.from(editorsMap.entries()).map(([userId, name]) => ({ userId, name }))
+      ? Array.from(editorsMap.entries()).map(([userId, name]) => ({ userId, name, status: 'editing' }))
       : [];
-    this.emitToVault(vaultId, CollaborationEvents.ANNOTATION_EDITING, { annotationId, editors });
+
+    const viewersMap = viewersByAnnotation.get(annotationId);
+    const viewers = viewersMap
+      ? Array.from(viewersMap.entries()).map(([userId, name]) => ({ userId, name, status: 'viewing' }))
+      : [];
+
+    // Broadcast unified presence list
+    this.emitToVault(vaultId, CollaborationEvents.ANNOTATION_EDITING, {
+      annotationId,
+      editors,         // kept for backward compat
+      presence: [...editors, ...viewers],
+    });
   }
 
   private removeEditor(vaultId: string, annotationId: string, userId: string, socketId: string): void {
@@ -106,6 +126,16 @@ export class CollaborationGateway
     if (map) {
       map.delete(userId);
       if (map.size === 0) editorsByAnnotation.delete(annotationId);
+      this.broadcastEditors(vaultId, annotationId);
+    }
+  }
+
+  private removeViewer(vaultId: string, annotationId: string, userId: string, socketId: string): void {
+    socketViewing.delete(socketId);
+    const map = viewersByAnnotation.get(annotationId);
+    if (map) {
+      map.delete(userId);
+      if (map.size === 0) viewersByAnnotation.delete(annotationId);
       this.broadcastEditors(vaultId, annotationId);
     }
   }
@@ -164,8 +194,51 @@ export class CollaborationGateway
       if (editing && editing.vaultId === vaultId) {
         this.removeEditor(editing.vaultId, editing.annotationId, editing.userId, client.id);
       }
+      const viewing = socketViewing.get(client.id);
+      if (viewing && viewing.vaultId === vaultId) {
+        this.removeViewer(viewing.vaultId, viewing.annotationId, viewing.userId, client.id);
+      }
       client.leave(vaultRoom(vaultId));
     }
+    return { success: true };
+  }
+
+  @UseGuards(WsJwtGuard)
+  @SubscribeMessage('startViewing')
+  async handleStartViewing(
+    client: AuthenticatedSocket,
+    payload: { vaultId: string; annotationId: string },
+  ): Promise<{ success: boolean; message?: string }> {
+    const { vaultId, annotationId } = payload || {};
+    if (!vaultId || !annotationId) return { success: false, message: 'vaultId and annotationId required' };
+    const user = client.data.user;
+    if (!user) return { success: false, message: 'Unauthorized' };
+
+    const member = await this.prisma.vaultMember.findUnique({
+      where: { vaultId_userId: { vaultId, userId: user.id } },
+    });
+    if (!member) return { success: false, message: 'Vault not found or access denied' };
+
+    const existing = socketViewing.get(client.id);
+    if (existing) this.removeViewer(existing.vaultId, existing.annotationId, existing.userId, client.id);
+
+    let map = viewersByAnnotation.get(annotationId);
+    if (!map) { map = new Map(); viewersByAnnotation.set(annotationId, map); }
+    map.set(user.id, user.name);
+    socketViewing.set(client.id, { vaultId, annotationId, userId: user.id });
+    this.broadcastEditors(vaultId, annotationId);
+    return { success: true };
+  }
+
+  @UseGuards(WsJwtGuard)
+  @SubscribeMessage('stopViewing')
+  handleStopViewing(
+    client: AuthenticatedSocket,
+    payload: { vaultId: string; annotationId: string },
+  ): { success: boolean } {
+    const { vaultId, annotationId } = payload || {};
+    const user = client.data.user;
+    if (vaultId && annotationId && user) this.removeViewer(vaultId, annotationId, user.id, client.id);
     return { success: true };
   }
 
