@@ -688,6 +688,28 @@ export class AuthService {
       });
 
       if (!verificationToken) {
+        const usedToken = await this.prisma.verificationToken.findFirst({
+          where: {
+            token,
+            type: OtpType.EMAIL_VERIFICATION,
+            used: true,
+          },
+          include: { user: true },
+        });
+
+        if (usedToken?.user.isEmailVerified) {
+          const user = await this.prisma.user.findUniqueOrThrow({
+            where: { id: usedToken.userId },
+            omit: { password: true, salt: true },
+          });
+
+          return {
+            message: 'Email already verified',
+            success: true,
+            data: { user },
+          };
+        }
+
         throw throwError('Invalid or expired verification link', HttpStatus.BAD_REQUEST);
       }
 
