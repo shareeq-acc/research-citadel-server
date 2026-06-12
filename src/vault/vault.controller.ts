@@ -5,8 +5,8 @@ import { VaultService } from './vault.service';
 import { User } from '@prisma/client';
 import { CurrentUser } from 'src/common/decorators/current-user.decorator';
 import { ApiResponse } from 'src/common/types';
-import { CreateVaultDto, UpdateVaultDto, AddVaultMemberDto, AuditLogResponseDto, AUDIT_ACTIONS, UserContributionStatsDto } from './dto';
-import { VaultSelect, VaultWithMyRole, VaultWithMyRoleAndMembers } from './queries';
+import { CreateVaultDto, UpdateVaultDto, AddVaultMemberDto, AuditLogResponseDto, AUDIT_ACTIONS, UserContributionStatsDto, VaultMemberResponseDto } from './dto';
+import { VaultSelect, VaultWithMyRole, VaultWithMyRoleAndMembers, VaultMemberWithUser } from './queries';
 import { AskQuestionDto, QaAnswerDto } from 'src/ai/dto/qa.dto';
 
 @Controller('vault')
@@ -29,17 +29,15 @@ export class VaultController {
   @ApiOperation({
     summary: 'Get Audit Logs by Vault',
     description:
-      'Get audit logs for a vault. Only vault members can access. Logs cover all sections: vault (create/update/delete), members (add/remove/role change), files (upload/delete), sources (add/update/delete), annotations (add/update/delete), relationships (create/delete). Optionally filter by action.',
+      'Get audit logs for a vault. Only vault members can access. Optionally filter by action, category, or date range.',
   })
   @ApiParam({ name: 'id', type: String, description: 'Vault UUID' })
-  @ApiQuery({ name: 'limit', required: false, type: Number, description: 'Max number of logs (1–100, default 50)' })
-  @ApiQuery({ name: 'offset', required: false, type: Number, description: 'Number of logs to skip (default 0)' })
-  @ApiQuery({
-    name: 'action',
-    required: false,
-    enum: AUDIT_ACTIONS,
-    description: 'Filter by audit action (e.g. SOURCE_ADDED, ANNOTATION_UPDATED)',
-  })
+  @ApiQuery({ name: 'limit', required: false, type: Number })
+  @ApiQuery({ name: 'offset', required: false, type: Number })
+  @ApiQuery({ name: 'action', required: false, enum: AUDIT_ACTIONS, description: 'Filter by exact action' })
+  @ApiQuery({ name: 'category', required: false, type: String, description: 'Filter by category: VAULT | MEMBER | FILE | SOURCE | ANNOTATION | CITATION' })
+  @ApiQuery({ name: 'startDate', required: false, type: String, description: 'ISO date string — include logs on or after this date' })
+  @ApiQuery({ name: 'endDate', required: false, type: String, description: 'ISO date string — include logs on or before this date' })
   @ApiResponseDoc({ status: 200, description: 'Audit logs retrieved', type: [AuditLogResponseDto] })
   async getAuditLogs(
     @CurrentUser() user: User,
@@ -47,8 +45,11 @@ export class VaultController {
     @Query('limit') limit?: number,
     @Query('offset') offset?: number,
     @Query('action') action?: string,
+    @Query('category') category?: string,
+    @Query('startDate') startDate?: string,
+    @Query('endDate') endDate?: string,
   ): Promise<ApiResponse<import('./vault.service').AuditLogEntry[]>> {
-    return this.vaultService.getAuditLogsByVault(user, id, { limit, offset, action });
+    return this.vaultService.getAuditLogsByVault(user, id, { limit, offset, action, category, startDate, endDate });
   }
 
   @Get(':id/stats')
@@ -130,6 +131,36 @@ export class VaultController {
     @Body() addVaultMemberDto: AddVaultMemberDto,
   ): Promise<ApiResponse<{ vaultId: string; userId: string; role: string }>> {
     return this.vaultService.addMember(user, id, addVaultMemberDto);
+  }
+
+  @Get(':id/members')
+  @ApiOperation({
+    summary: 'List Vault Members',
+    description: 'Get all members of a vault with their role and profile details. Any vault member can access this endpoint.',
+  })
+  @ApiParam({ name: 'id', type: String, description: 'Vault UUID' })
+  @ApiResponseDoc({ status: 200, description: 'Members retrieved', type: [VaultMemberResponseDto] })
+  async getMembers(
+    @CurrentUser() user: User,
+    @Param('id', new ParseUUIDPipe({ version: '4' })) id: string,
+  ): Promise<ApiResponse<VaultMemberWithUser[]>> {
+    return this.vaultService.getMembers(user, id);
+  }
+
+  @Delete(':id/members/:userId')
+  @ApiOperation({
+    summary: 'Remove Vault Member',
+    description: 'Remove a member from a vault. Only the vault owner can remove members. The owner cannot be removed.',
+  })
+  @ApiParam({ name: 'id', type: String, description: 'Vault UUID' })
+  @ApiParam({ name: 'userId', type: String, description: 'UUID of the user to remove' })
+  @ApiResponseDoc({ status: 200, description: 'Member removed' })
+  async removeMember(
+    @CurrentUser() user: User,
+    @Param('id', new ParseUUIDPipe({ version: '4' })) id: string,
+    @Param('userId', new ParseUUIDPipe({ version: '4' })) userId: string,
+  ): Promise<ApiResponse<{ removed: boolean }>> {
+    return this.vaultService.removeMember(user, id, userId);
   }
 
   @Post(':id/ask')

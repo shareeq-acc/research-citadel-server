@@ -53,17 +53,20 @@ export class AuthService {
 
   async register(res: Response, registerDto: RegisterDto): Promise<ApiResponse<RegisterUserResponse>> {
     try {
-      const { name, email, password } = registerDto;
+      const { name, username, email, password } = registerDto;
 
-      const existingUser = await this.prisma.user.findUnique({
-        where: { email },
-      });
-      if (existingUser) throw throwError('User already exists', HttpStatus.BAD_REQUEST);
+      // Check email uniqueness
+      const existingEmail = await this.prisma.user.findUnique({ where: { email } });
+      if (existingEmail) throw throwError('Email is already registered', HttpStatus.BAD_REQUEST);
+
+      // Check username uniqueness
+      const existingUsername = await this.prisma.user.findUnique({ where: { username } });
+      if (existingUsername) throw throwError('Username is already taken', HttpStatus.BAD_REQUEST);
 
       const { salt, hash } = hashPassword(password);
 
       const user = await this.prisma.user.create({
-        data: { name, email, password: hash, salt },
+        data: { name, username, email, password: hash, salt },
         omit: {
           password: true,
           salt: true,

@@ -32,6 +32,16 @@ export class UserController {
     await this.redisService.deleteMany(keys);
   }
 
+  @ApiProperty({ title: 'Search Users by Username', description: 'Search users by username (min 2 chars, partial match)' })
+  @ApiQuery({ name: 'q', type: String, required: true, description: 'Username search query' })
+  @Get('search')
+  async searchByUsername(
+    @CurrentUser() user: User,
+    @Query('q') q: string,
+  ) {
+    return this.userService.searchByUsername(user, q ?? '');
+  }
+
   @ApiProperty({ title: 'Get All Users', description: 'Get all users' })
   @ApiQuery({ name: 'page', type: Number, required: false })
   @ApiQuery({ name: 'limit', type: Number, required: false })

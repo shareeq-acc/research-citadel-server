@@ -210,4 +210,20 @@ export class SourceController {
   ): Promise<ApiResponse<{ sourceId: string; chunksCreated: number }>> {
     return this.sourceService.processForQa(user, vaultId, id);
   }
+
+  @Post(':id/extract-and-index')
+  @ApiOperation({
+    summary: 'Extract Text and Index for Q&A',
+    description:
+      'One-shot endpoint: downloads the attached file, extracts text (if not already done), then chunks and indexes the source for Q&A. Use this when process-for-qa fails with "No extracted text available". Only CONTRIBUTOR or OWNER can run this.',
+  })
+  @ApiParam({ name: 'vaultId', type: String, description: 'Vault ID' })
+  @ApiParam({ name: 'id', type: String, description: 'Source ID' })
+  async extractAndIndex(
+    @CurrentUser() user: User,
+    @Param('vaultId') vaultId: string,
+    @Param('id') id: string,
+  ): Promise<ApiResponse<{ sourceId: string; chunksCreated: number; wordsExtracted: number }>> {
+    return this.sourceService.extractAndIndex(user, vaultId, id);
+  }
 }

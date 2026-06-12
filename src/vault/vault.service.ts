@@ -6,9 +6,19 @@ import { ApiResponse } from 'src/common/types';
 import { throwError } from 'src/common/utils/helpers';
 import { CollaborationGateway } from 'src/collaboration/collaboration.gateway';
 import { QaService } from 'src/ai/services/qa.service';
-import { vaultSelect, VaultSelect, VaultWithMyRole, vaultSelectWithMembers, VaultWithMyRoleAndMembers } from './queries';
+import { vaultSelect, VaultSelect, VaultWithMyRole, vaultSelectWithMembers, VaultWithMyRoleAndMembers, vaultMemberSelect, VaultMemberWithUser } from './queries';
 import { CreateVaultDto, UpdateVaultDto, AddVaultMemberDto } from './dto';
 import { VaultAuditStatsEntry } from './dto';
+
+/** Category → AuditAction prefix map — used for category-based audit log filtering */
+const CATEGORY_PREFIXES: Record<string, string[]> = {
+  VAULT:      ['VAULT_'],
+  MEMBER:     ['MEMBER_'],
+  FILE:       ['FILE_'],
+  SOURCE:     ['SOURCE_'],
+  ANNOTATION: ['ANNOTATION_'],
+  CITATION:   ['CITATION_'],
+};
 
 @Injectable()
 export class VaultService {
@@ -224,6 +234,101 @@ export class VaultService {
     }
   }
 
+  async getMembers(user: User, vaultId: string): Promise<ApiResponse<VaultMemberWithUser[]>> {
+    try {
+      const vault = await this.prismaService.vault.findFirst({
+        where: { id: vaultId, deletedAt: null },
+      });
+      if (!vault) throw throwError('Vault not found', HttpStatus.NOT_FOUND);
+
+      // Any vault member (including the owner) can list members
+      const membership = await this.prismaService.vaultMember.findUnique({
+        where: { vaultId_userId: { vaultId, userId: user.id } },
+      });
+      if (vault.ownerId !== user.id && !membership) {
+        throw throwError('You do not have access to this vault', HttpStatus.FORBIDDEN);
+      }
+
+      const members = await this.prismaService.vaultMember.findMany({
+        where: { vaultId },
+        select: {
+          ...vaultMemberSelect,
+          acceptedAt: true,
+        },
+        orderBy: { createdAt: 'asc' },
+      });
+
+      const data: VaultMemberWithUser[] = members.map((m) => ({
+        id: m.id,
+        role: m.role,
+        user: m.user,
+        joinedAt: (m as any).acceptedAt ?? null,
+      }));
+
+      return {
+        message: 'Vault members retrieved successfully',
+        success: true,
+        data,
+      };
+    } catch (err: unknown) {
+      if (err instanceof HttpException) throw err;
+      this.logger.error('Failed to get vault members', (err as Error)?.stack, VaultService.name);
+      throw throwError((err as Error)?.message || 'Failed to get vault members', HttpStatus.INTERNAL_SERVER_ERROR);
+    }
+  }
+
+  async removeMember(user: User, vaultId: string, targetUserId: string): Promise<ApiResponse<{ removed: boolean }>> {
+    try {
+      const vault = await this.prismaService.vault.findFirst({
+        where: { id: vaultId, deletedAt: null },
+      });
+      if (!vault) throw throwError('Vault not found', HttpStatus.NOT_FOUND);
+      if (vault.ownerId !== user.id) {
+        throw throwError('Forbidden: only the vault owner can remove members', HttpStatus.FORBIDDEN);
+      }
+      if (targetUserId === vault.ownerId) {
+        throw throwError('Cannot remove the vault owner', HttpStatus.BAD_REQUEST);
+      }
+
+      const member = await this.prismaService.vaultMember.findUnique({
+        where: { vaultId_userId: { vaultId, userId: targetUserId } },
+      });
+      if (!member) throw throwError('Member not found in this vault', HttpStatus.NOT_FOUND);
+
+      await this.prismaService.vaultMember.delete({
+        where: { vaultId_userId: { vaultId, userId: targetUserId } },
+      });
+
+      await this.prismaService.auditLog.create({
+        data: {
+          vaultId,
+          userId: user.id,
+          action: AuditAction.MEMBER_REMOVED,
+          entityType: 'member',
+          entityId: member.id,
+          details: { removedUserId: targetUserId },
+        },
+      });
+
+      return {
+        message: 'Member removed successfully',
+        success: true,
+        data: { removed: true },
+      };
+    } catch (err: unknown) {
+      if (err instanceof HttpException) throw err;
+      this.logger.error('Failed to remove vault member', (err as Error)?.stack, VaultService.name);
+      this.logger.logData({
+        error: (err as Error)?.message,
+        status: (err as any)?.status || HttpStatus.INTERNAL_SERVER_ERROR,
+        method: 'removeMember',
+        vaultId,
+        userId: user.id,
+      });
+      throw throwError((err as Error)?.message || 'Failed to remove member', (err as any)?.status || HttpStatus.INTERNAL_SERVER_ERROR);
+    }
+  }
+
   async addMember(user: User, vaultId: string, dto: AddVaultMemberDto): Promise<ApiResponse<{ vaultId: string; userId: string; role: VaultRole }>> {
     try {
       if (dto.role === VaultRole.OWNER) {
@@ -296,7 +401,14 @@ export class VaultService {
   async getAuditLogsByVault(
     user: User,
     vaultId: string,
-    options?: { limit?: number; offset?: number; action?: string },
+    options?: {
+      limit?: number;
+      offset?: number;
+      action?: string;
+      category?: string;
+      startDate?: string;
+      endDate?: string;
+    },
   ): Promise<ApiResponse<AuditLogEntry[]>> {
     try {
       const vault = await this.prismaService.vault.findFirst({
@@ -312,9 +424,45 @@ export class VaultService {
 
       const limit = Math.min(Math.max(options?.limit ?? 50, 1), 100);
       const offset = Math.max(options?.offset ?? 0, 0);
-      const where: { vaultId: string; action?: AuditAction } = { vaultId };
+
+      // Build action filter: exact action OR category prefix expansion
+      let actionFilter: AuditAction[] | AuditAction | undefined;
+
       if (options?.action && Object.values(AuditAction).includes(options.action as AuditAction)) {
-        where.action = options.action as AuditAction;
+        actionFilter = options.action as AuditAction;
+      } else if (options?.category) {
+        const cat = options.category.toUpperCase();
+        const prefixes = CATEGORY_PREFIXES[cat];
+        if (prefixes) {
+          const matched = Object.values(AuditAction).filter((a) =>
+            prefixes.some((prefix) => a.startsWith(prefix)),
+          );
+          if (matched.length > 0) actionFilter = matched as any;
+        }
+      }
+
+      // Build date range filter
+      const createdAtFilter: { gte?: Date; lte?: Date } = {};
+      if (options?.startDate) {
+        const d = new Date(options.startDate);
+        if (!isNaN(d.getTime())) createdAtFilter.gte = d;
+      }
+      if (options?.endDate) {
+        const d = new Date(options.endDate);
+        if (!isNaN(d.getTime())) {
+          d.setHours(23, 59, 59, 999); // include the whole day
+          createdAtFilter.lte = d;
+        }
+      }
+
+      const where: any = { vaultId };
+      if (Array.isArray(actionFilter)) {
+        where.action = { in: actionFilter };
+      } else if (actionFilter) {
+        where.action = actionFilter;
+      }
+      if (Object.keys(createdAtFilter).length > 0) {
+        where.createdAt = createdAtFilter;
       }
 
       const logs = await this.prismaService.auditLog.findMany({

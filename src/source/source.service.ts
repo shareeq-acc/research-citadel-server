@@ -17,6 +17,12 @@ import { CreateSourceDto, UpdateSourceDto } from './dto';
 
 const SOURCE_UPLOAD_PREFIX = 'uploads/sources/';
 
+/** Map raw Prisma source row (with _count) → SourceSelect (with chunksProcessed). */
+function mapSource(raw: any): SourceSelect {
+  const { _count, ...rest } = raw;
+  return { ...rest, chunksProcessed: (_count?.chunks ?? 0) > 0 };
+}
+
 /** Normalize form/JSON value to string[] for Prisma (authors, keywords). */
 function ensureStringArray(value: unknown): string[] {
   if (Array.isArray(value)) {
@@ -136,7 +142,7 @@ export class SourceService {
       return {
         message: 'Source created successfully',
         success: true,
-        data: source,
+        data: mapSource(source),
       };
     } catch (err) {
       this.logger.error('Failed to create source', err.stack, SourceService.name);
@@ -267,7 +273,7 @@ export class SourceService {
       return {
         message: 'Source created and file uploaded successfully',
         success: true,
-        data: source,
+        data: mapSource(source),
       };
     } catch (err) {
       this.logger.error('Failed to create source with file', err.stack, SourceService.name);
@@ -311,7 +317,7 @@ export class SourceService {
       return {
         message: 'Sources retrieved successfully',
         success: true,
-        data: { sources, total, page, limit },
+        data: { sources: sources.map(mapSource), total, page, limit },
       };
     } catch (err) {
       this.logger.error('Failed to list sources', err.stack, SourceService.name);
@@ -339,7 +345,7 @@ export class SourceService {
       return {
         message: 'Source retrieved successfully',
         success: true,
-        data: source,
+        data: mapSource(source),
       };
     } catch (err) {
       this.logger.error('Failed to get source', err.stack, SourceService.name);
@@ -414,7 +420,7 @@ export class SourceService {
       return {
         message: 'Source updated successfully',
         success: true,
-        data: updated,
+        data: mapSource(updated),
       };
     } catch (err) {
       this.logger.error('Failed to update source', err.stack, SourceService.name);
@@ -545,7 +551,7 @@ export class SourceService {
       return {
         message: 'Summary generated successfully',
         success: true,
-        data: updated,
+        data: mapSource(updated),
       };
     } catch (err) {
       this.logger.error('Failed to generate summary', err.stack, SourceService.name);
@@ -619,7 +625,7 @@ export class SourceService {
       return {
         message: 'Insights extracted successfully',
         success: true,
-        data: updated,
+        data: mapSource(updated),
       };
     } catch (err) {
       this.logger.error('Failed to extract insights', err.stack, SourceService.name);
@@ -632,6 +638,124 @@ export class SourceService {
         userId: user.id,
       });
       throw throwError(err.message || 'Failed to extract insights', err.status || HttpStatus.INTERNAL_SERVER_ERROR);
+    }
+  }
+
+  async extractAndIndex(
+    user: User,
+    vaultId: string,
+    sourceId: string,
+  ): Promise<ApiResponse<{ sourceId: string; chunksCreated: number; wordsExtracted: number }>> {
+    try {
+      await this.ensureCanEditSource(user.id, vaultId);
+
+      const source = await this.prismaService.source.findFirst({
+        where: { id: sourceId, vaultId, deletedAt: null },
+        include: { file: true },
+      });
+      if (!source) throw throwError('Source not found', HttpStatus.NOT_FOUND);
+
+      let textToIndex = source.extractedText;
+
+      // ── Step 1: Extract text from file if not already done ──────────────────
+      if (!textToIndex?.trim()) {
+        if (!source.file) {
+          throw throwError(
+            'Cannot extract text: no file attached to this source. Upload a PDF or document first.',
+            HttpStatus.BAD_REQUEST,
+          );
+        }
+
+        if (!this.documentExtractionService.isSupported(source.file.fileMimeType)) {
+          throw throwError(
+            `Cannot extract text: unsupported file type "${source.file.fileMimeType}". Only PDF and DOCX files are supported.`,
+            HttpStatus.UNPROCESSABLE_ENTITY,
+          );
+        }
+
+        this.logger.log(`Downloading file ${source.file.id} for text extraction`);
+        const fileBuffer = await this.storageService.downloadFile(source.file.fileUrl);
+
+        this.logger.log(`Extracting text from ${source.file.fileMimeType} for source ${sourceId}`);
+        const extraction = await this.documentExtractionService.extractText(fileBuffer, source.file.fileMimeType);
+
+        if (!extraction.text?.trim()) {
+          throw throwError(
+            'Text extraction produced no content. The document may be scanned or image-only.',
+            HttpStatus.UNPROCESSABLE_ENTITY,
+          );
+        }
+
+        textToIndex = extraction.text;
+
+        // Persist extracted text
+        await this.prismaService.source.update({
+          where: { id: sourceId },
+          data: {
+            extractedText: textToIndex,
+            extractedMetadata: extraction.metadata as any,
+            textExtractedAt: new Date(),
+          },
+        });
+
+        this.logger.log(`Extracted ${extraction.wordCount} words from source ${sourceId}`);
+      }
+
+      // ── Step 2: Chunk and index ─────────────────────────────────────────────
+      await this.prismaService.sourceChunk.deleteMany({ where: { sourceId } });
+
+      const chunks = this.chunkingService.chunkText(textToIndex!);
+      this.logger.log(`Creating ${chunks.length} chunks for source ${sourceId}`);
+
+      await this.prismaService.$transaction(
+        chunks.map((chunk) =>
+          this.prismaService.sourceChunk.create({
+            data: {
+              sourceId,
+              vaultId,
+              chunkText: chunk.text,
+              chunkIndex: chunk.index,
+            },
+          }),
+        ),
+      );
+
+      // Mark source as Q&A ready by emitting collaboration event (chunks exist now)
+      const updatedSource = await this.prismaService.source.findFirst({
+        where: { id: sourceId },
+        select: sourceSelect,
+      });
+      if (updatedSource) this.collaborationGateway.emitSourceUpdated(vaultId, mapSource(updatedSource));
+
+      await this.prismaService.auditLog.create({
+        data: {
+          vaultId,
+          userId: user.id,
+          action: AuditAction.SOURCE_UPDATED,
+          entityType: 'source',
+          entityId: sourceId,
+          details: { action: 'extract_and_index_complete', chunksCreated: chunks.length },
+        },
+      });
+
+      const wordsExtracted = textToIndex!.split(/\s+/).length;
+
+      return {
+        message: `Text extracted and indexed: ${chunks.length} chunks created`,
+        success: true,
+        data: { sourceId, chunksCreated: chunks.length, wordsExtracted },
+      };
+    } catch (err) {
+      this.logger.error('Failed to extract and index source', err.stack, SourceService.name);
+      this.logger.logData({
+        error: err.message,
+        status: err.status || HttpStatus.INTERNAL_SERVER_ERROR,
+        method: 'extractAndIndex',
+        vaultId,
+        sourceId,
+        userId: user.id,
+      });
+      throw throwError(err.message || 'Failed to extract and index source', err.status || HttpStatus.INTERNAL_SERVER_ERROR);
     }
   }
 

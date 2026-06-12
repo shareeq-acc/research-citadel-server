@@ -18,6 +18,7 @@ enum LoginProvider {
 model User {
   id            String        @id @unique @default(uuid()) @db.Uuid
   name          String
+  username      String        @unique
   email         String        @unique
   avatar        String?
   password      String?
@@ -47,9 +48,14 @@ model User {
   auditLogs        AuditLog[]
   fileLocks        FileLock[]
   annotationLocks  AnnotationLock[]
+  chatMemberships  VaultChatMember[] @relation("VaultChatMembers")
+  sentChatMessages VaultChatMessage[] @relation("VaultChatSender")
+  sentInvitations      VaultInvitation[] @relation("InvitationSender")
+  receivedInvitations  VaultInvitation[] @relation("InvitationReceiver")
 
   @@index([name])
   @@index([email])
+  @@index([username])
 }
 
 enum OtpType {
@@ -190,6 +196,9 @@ model Vault {
   sources   Source[]
   tags      VaultTag[]
   auditLogs AuditLog[]
+  chatMembers VaultChatMember[]
+  chatMessages VaultChatMessage[]
+  invitations  VaultInvitation[]  @relation("VaultInvitations")
 
   @@index([ownerId])
   @@index([createdAt])
@@ -592,4 +601,85 @@ model SourceChunk {
   @@index([sourceId])
   @@index([vaultId])
   @@index([chunkIndex])
+}
+
+// ============================================================================
+// VAULT CHAT
+// ============================================================================
+
+/// Members explicitly added to the vault's chat channel by the owner.
+model VaultChatMember {
+  id      String @id @unique @default(uuid()) @db.Uuid
+  vaultId String @db.Uuid
+  userId  String @db.Uuid
+  addedBy String @db.Uuid
+
+  createdAt DateTime @default(now())
+
+  vault Vault @relation(fields: [vaultId], references: [id], onDelete: Cascade)
+  user  User  @relation("VaultChatMembers", fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([vaultId, userId])
+  @@index([vaultId])
+  @@index([userId])
+}
+
+/// Chat messages in a vault's communication channel.
+model VaultChatMessage {
+  id      String @id @unique @default(uuid()) @db.Uuid
+  vaultId String @db.Uuid
+  senderId String @db.Uuid
+
+  content     String @db.Text
+  replyToId   String? @db.Uuid
+  replyToText String? @db.Text
+  replyToUser String?
+
+  readBy String[] @default([]) @db.Uuid
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime?
+
+  vault  Vault @relation(fields: [vaultId], references: [id], onDelete: Cascade)
+  sender User  @relation("VaultChatSender", fields: [senderId], references: [id], onDelete: Cascade)
+
+  @@index([vaultId])
+  @@index([senderId])
+  @@index([createdAt])
+}
+
+// ============================================================================
+// VAULT INVITATIONS
+// ============================================================================
+
+enum InvitationStatus {
+  PENDING
+  ACCEPTED
+  REJECTED
+  EXPIRED
+}
+
+model VaultInvitation {
+  id            String           @id @unique @default(uuid()) @db.Uuid
+  vaultId       String           @db.Uuid
+  invitedUserId String           @db.Uuid
+  invitedBy     String           @db.Uuid
+  role          VaultRole        @default(CONTRIBUTOR)
+  status        InvitationStatus @default(PENDING)
+  token         String           @unique
+  expiresAt     DateTime
+  respondedAt   DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  vault       Vault @relation("VaultInvitations", fields: [vaultId], references: [id], onDelete: Cascade)
+  invitedUser User  @relation("InvitationReceiver", fields: [invitedUserId], references: [id], onDelete: Cascade)
+  sender      User  @relation("InvitationSender", fields: [invitedBy], references: [id], onDelete: Cascade)
+
+  @@index([vaultId])
+  @@index([invitedUserId])
+  @@index([token])
+  @@index([expiresAt])
 }

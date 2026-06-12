@@ -1,10 +1,11 @@
 import { Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { MulterFile } from 'src/common/types';
-import { DeleteObjectCommand, PutObjectCommand, S3Client } from '@aws-sdk/client-s3';
+import { DeleteObjectCommand, GetObjectCommand, PutObjectCommand, S3Client } from '@aws-sdk/client-s3';
 import { getRandomFileName } from 'src/common/utils/helpers';
 import { NodeHttpHandler } from '@smithy/node-http-handler';
 import https from 'https';
+import { Readable } from 'stream';
 
 @Injectable()
 export class StorageService {
@@ -88,5 +89,41 @@ export class StorageService {
 
   getImageUrl(filename: string) {
     return `${this.publicUrl}/${filename}`;
+  }
+
+  /**
+   * Download a file from R2 by its public URL or storage key.
+   * Accepts the full public URL (as stored in fileUrl) and extracts the key.
+   */
+  async downloadFile(fileUrl: string): Promise<Buffer> {
+    try {
+      // Extract key from URL: strip the publicUrl prefix
+      const key = fileUrl.startsWith(this.publicUrl)
+        ? fileUrl.slice(this.publicUrl.length + 1) // remove trailing slash too
+        : fileUrl;
+
+      const command = new GetObjectCommand({
+        Bucket: this.bucketName,
+        Key: key,
+      });
+
+      const response = await this.s3Client.send(command);
+
+      if (!response.Body) {
+        throw new Error('Empty response body from storage');
+      }
+
+      // Stream → Buffer
+      const stream = response.Body as Readable;
+      return new Promise<Buffer>((resolve, reject) => {
+        const chunks: Buffer[] = [];
+        stream.on('data', (chunk: Buffer) => chunks.push(chunk));
+        stream.on('end', () => resolve(Buffer.concat(chunks)));
+        stream.on('error', reject);
+      });
+    } catch (error) {
+      console.error('Error downloading file:', error);
+      throw new Error(`File download failed: ${error.message}`);
+    }
   }
 }

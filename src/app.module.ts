@@ -14,6 +14,8 @@ import { BullMQModule } from './common/modules/bullmq.module';
 import { CollaborationModule } from './collaboration/collaboration.module';
 import { DocumentModule } from './document/document.module';
 import { AiModule } from './ai/ai.module';
+import { ChatModule } from './chat/chat.module';
+import { InvitationModule } from './invitation/invitation.module';
 
 @Module({
   imports: [
@@ -32,6 +34,9 @@ import { AiModule } from './ai/ai.module';
     MailerModule,
     DocumentModule,
     AiModule,
+    ChatModule,
+    InvitationModule,
+    InvitationModule,
   ],
   controllers: [AppController],
   providers: [AppService],

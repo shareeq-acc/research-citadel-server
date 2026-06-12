@@ -40,6 +40,9 @@ export const sourceSelect = {
       pageCount: true,
     },
   },
+  _count: {
+    select: { chunks: true },
+  },
 } as const;
 
 export type SourceSelect = {
@@ -65,6 +68,8 @@ export type SourceSelect = {
   createdAt: Date;
   updatedAt: Date;
   deletedAt: Date | null;
+  /** true when at least one SourceChunk exists for this source */
+  chunksProcessed: boolean;
   creator: {
     id: string;
     name: string;

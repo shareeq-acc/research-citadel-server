@@ -23,12 +23,15 @@ export const CollaborationEvents = {
   ANNOTATION_CREATED: 'annotation:created',
   ANNOTATION_UPDATED: 'annotation:updated',
   ANNOTATION_DELETED: 'annotation:deleted',
-  /** Presence: who is currently editing an annotation */
   ANNOTATION_EDITING: 'annotation:editing',
-  /** Live draft: content changes while editing (reflect immediately on other clients) */
   ANNOTATION_DRAFT: 'annotation:draft',
-  /** Push notification: user was added to a vault */
   NOTIFICATION_VAULT_ADDED: 'notification:vault_added',
+  // Chat
+  CHAT_MESSAGE: 'chat:message',
+  CHAT_MESSAGE_DELETED: 'chat:message_deleted',
+  CHAT_TYPING: 'chat:typing',
+  CHAT_MEMBER_ADDED: 'chat:member_added',
+  CHAT_MEMBER_REMOVED: 'chat:member_removed',
 } as const;
 
 export interface EditorInfo {
@@ -309,5 +312,43 @@ export class CollaborationGateway
   ): void {
     if (!this.server) return;
     this.server.to(userRoom(userId)).emit(CollaborationEvents.NOTIFICATION_VAULT_ADDED, payload);
+  }
+
+  // ── Chat helpers ────────────────────────────────────────────────────────────
+
+  emitChatMessage(vaultId: string, message: object): void {
+    this.emitToVault(vaultId, CollaborationEvents.CHAT_MESSAGE, message);
+  }
+
+  emitChatMessageDeleted(vaultId: string, messageId: string): void {
+    this.emitToVault(vaultId, CollaborationEvents.CHAT_MESSAGE_DELETED, { messageId });
+  }
+
+  emitChatMemberAdded(vaultId: string, member: object): void {
+    this.emitToVault(vaultId, CollaborationEvents.CHAT_MEMBER_ADDED, member);
+  }
+
+  emitChatMemberRemoved(vaultId: string, userId: string): void {
+    this.emitToVault(vaultId, CollaborationEvents.CHAT_MEMBER_REMOVED, { userId });
+  }
+
+  /** Client sends typing status; server broadcasts to the rest of the vault room. */
+  @UseGuards(WsJwtGuard)
+  @SubscribeMessage('chat:typing')
+  async handleChatTyping(
+    client: AuthenticatedSocket,
+    payload: { vaultId: string; isTyping: boolean },
+  ): Promise<{ success: boolean }> {
+    const { vaultId, isTyping } = payload || {};
+    const user = client.data.user;
+    if (!vaultId || !user) return { success: false };
+
+    // Broadcast to others in the room (not back to sender)
+    client.to(vaultRoom(vaultId)).emit(CollaborationEvents.CHAT_TYPING, {
+      userId: user.id,
+      userName: user.name,
+      isTyping,
+    });
+    return { success: true };
   }
 }

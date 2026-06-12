@@ -4,6 +4,7 @@ export const userSelect = {
   id: true,
   email: true,
   name: true,
+  username: true,
   avatar: true,
   loginProvider: true,
   hasNotifications: true,
@@ -23,6 +24,7 @@ export const completeUserSelect = {
   id: true,
   email: true,
   name: true,
+  username: true,
   avatar: true,
   loginProvider: true,
   hasNotifications: true,
@@ -62,6 +64,7 @@ export const minimalUserSelect = {
   id: true,
   email: true,
   name: true,
+  username: true,
   avatar: true,
 } satisfies Prisma.UserSelect;
 

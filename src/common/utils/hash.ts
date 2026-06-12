@@ -16,3 +16,11 @@ export const generateSecureToken = async (length: number = 32): Promise<string> 
   const token = crypto.randomBytes(length).toString('hex');
   return await bcrypt.hash(token, 10);
 };
+
+/**
+ * Generate a URL-safe random token (hex, no special characters).
+ * Use this for invitation links and similar URL-embedded tokens.
+ */
+export const generateUrlSafeToken = (length: number = 32): string => {
+  return crypto.randomBytes(length).toString('hex');
+};

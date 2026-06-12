@@ -29,6 +29,10 @@ export class UserService {
     try {
       const { page = 1, limit = 20, search = '', filter = '', sort = '' } = query || {};
 
+      // Ensure page is at least 1 to prevent negative skip values
+      const safePage  = Math.max(1, Number(page));
+      const safeLimit = Math.max(1, Math.min(100, Number(limit)));
+
       const where: Prisma.UserWhereInput = {
         deletedAt: null,
         id: { not: user.id },
@@ -36,26 +40,30 @@ export class UserService {
       const orderBy: Prisma.UserOrderByWithRelationInput = {};
 
       if (search) {
-        where.OR = [{ email: { contains: search, mode: 'insensitive' } }];
+        where.OR = [
+          { email:    { contains: search, mode: 'insensitive' } },
+          { name:     { contains: search, mode: 'insensitive' } },
+          { username: { contains: search, mode: 'insensitive' } },
+        ];
       }
 
       if (filter) orderBy[filter] = 'asc';
-      if (sort) orderBy[sort] = 'desc';
+      if (sort)   orderBy[sort]   = 'desc';
 
       const [users, totalCount] = await Promise.all([
         this.prismaService.user.findMany({
           select: userSelect,
           where,
           orderBy,
-          skip: (Number(page) - 1) * Number(limit),
-          take: Number(limit),
+          skip: (safePage - 1) * safeLimit,
+          take: safeLimit,
         }),
         this.prismaService.user.count({ where }),
       ]);
 
-      const totalPages = Math.ceil(totalCount / Number(limit));
+      const totalPages = Math.ceil(totalCount / safeLimit);
 
-      const usersWithImages = await Promise.all(users.map((user) => this.populateUserImages(user)));
+      const usersWithImages = await Promise.all(users.map((u) => this.populateUserImages(u)));
 
       return {
         message: 'Users retrieved successfully',
@@ -65,10 +73,10 @@ export class UserService {
           pagination: {
             totalCount,
             totalPages,
-            page: Number(page),
-            limit: Number(limit),
-            hasNextPage: Number(page) < totalPages,
-            hasPrevPage: Number(page) > 1,
+            page: safePage,
+            limit: safeLimit,
+            hasNextPage: safePage < totalPages,
+            hasPrevPage: safePage > 1,
           },
         },
       };
@@ -230,6 +238,31 @@ export class UserService {
         filename: avatar?.filename,
       });
       throw throwError(err.message || 'Failed to update avatar', err.status || HttpStatus.INTERNAL_SERVER_ERROR);
+    }
+  }
+
+  async searchByUsername(
+    currentUser: User,
+    username: string,
+  ): Promise<ApiResponse<{ id: string; name: string; username: string; email: string; avatar: string | null }[]>> {
+    try {
+      if (!username || username.trim().length < 2) {
+        return { message: 'Users retrieved', success: true, data: [] };
+      }
+      const users = await this.prismaService.user.findMany({
+        where: {
+          deletedAt: null,
+          id: { not: currentUser.id },
+          username: { contains: username.trim().toLowerCase(), mode: 'insensitive' },
+        },
+        select: { id: true, name: true, username: true, email: true, avatar: true },
+        take: 10,
+        orderBy: { username: 'asc' },
+      });
+      return { message: 'Users retrieved', success: true, data: users };
+    } catch (err) {
+      this.logger.error('searchByUsername failed', err.stack, UserService.name);
+      throw throwError(err.message || 'Search failed', HttpStatus.INTERNAL_SERVER_ERROR);
     }
   }
 

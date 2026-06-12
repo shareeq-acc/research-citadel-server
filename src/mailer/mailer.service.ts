@@ -22,6 +22,198 @@ export class MailerService {
     });
   }
 
+  async sendVaultInvitationEmail(payload: {
+    toEmail: string;
+    toName: string;
+    senderName: string;
+    vaultName: string;
+    role: string;
+    token: string;
+    expiresAt: Date;
+  }) {
+    const baseDomain = this.configService.get<string>('BASE_DOMAIN') ?? 'http://localhost:3000';
+    const encodedToken = encodeURIComponent(payload.token);
+    const acceptUrl = `${baseDomain}/invitation/${encodedToken}?action=ACCEPTED`;
+    const rejectUrl = `${baseDomain}/invitation/${encodedToken}?action=REJECTED`;
+    const viewUrl   = `${baseDomain}/invitation/${encodedToken}`;
+    const expiry    = payload.expiresAt.toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' });
+
+    const html = `
+<!DOCTYPE html>
+<html lang="en">
+<head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Vault Invitation</title></head>
+<body style="margin:0;padding:0;background:#FAFAF8;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Arial,sans-serif;">
+<table width="100%" cellpadding="0" cellspacing="0" style="background:#FAFAF8;padding:40px 20px;">
+  <tr><td align="center">
+    <table width="560" cellpadding="0" cellspacing="0" style="background:#ffffff;border:3px solid #0A0A0A;box-shadow:6px 6px 0px #0A0A0A;border-radius:4px;overflow:hidden;">
+
+      <!-- Header -->
+      <tr>
+        <td style="background:#FACC15;border-bottom:3px solid #0A0A0A;padding:24px 32px;">
+          <table width="100%" cellpadding="0" cellspacing="0">
+            <tr>
+              <td>
+                <span style="font-family:'Courier New',monospace;font-size:11px;font-weight:900;letter-spacing:3px;color:#0A0A0A;text-transform:uppercase;">RESEARCH CITADEL</span>
+                <div style="font-size:20px;font-weight:900;color:#0A0A0A;margin-top:4px;text-transform:uppercase;letter-spacing:-0.5px;">Vault Invitation</div>
+              </td>
+              <td align="right">
+                <span style="background:#0A0A0A;color:#FACC15;font-size:10px;font-weight:900;font-family:'Courier New',monospace;padding:4px 10px;letter-spacing:2px;text-transform:uppercase;">INVITE</span>
+              </td>
+            </tr>
+          </table>
+        </td>
+      </tr>
+
+      <!-- Body -->
+      <tr>
+        <td style="padding:32px;">
+          <p style="margin:0 0 8px;font-size:13px;color:#555;font-family:'Courier New',monospace;text-transform:uppercase;letter-spacing:1px;">Hello, ${payload.toName}</p>
+          <p style="margin:0 0 24px;font-size:16px;color:#0A0A0A;font-weight:700;line-height:1.5;">
+            <strong>${payload.senderName}</strong> has invited you to collaborate on the vault
+            <strong style="background:#FAFAF8;border:2px solid #0A0A0A;padding:2px 8px;font-family:'Courier New',monospace;">${payload.vaultName}</strong>
+            with the role of <strong style="text-transform:uppercase;">${payload.role}</strong>.
+          </p>
+
+          <!-- Role badge -->
+          <table cellpadding="0" cellspacing="0" style="margin:0 0 28px;">
+            <tr>
+              <td style="background:#F5F5F0;border:2px solid #0A0A0A;padding:12px 20px;box-shadow:3px 3px 0 #0A0A0A;">
+                <span style="font-family:'Courier New',monospace;font-size:11px;color:#555;text-transform:uppercase;letter-spacing:1px;">Assigned Role</span>
+                <div style="font-size:18px;font-weight:900;color:#0A0A0A;margin-top:4px;text-transform:uppercase;">${payload.role}</div>
+              </td>
+            </tr>
+          </table>
+
+          <!-- CTA Buttons -->
+          <table cellpadding="0" cellspacing="0" style="margin-bottom:28px;">
+            <tr>
+              <td style="padding-right:12px;">
+                <a href="${acceptUrl}" style="display:inline-block;background:#0A0A0A;color:#FACC15;font-family:'Courier New',monospace;font-weight:900;font-size:12px;text-transform:uppercase;letter-spacing:2px;padding:14px 28px;text-decoration:none;border:2px solid #0A0A0A;box-shadow:4px 4px 0 #555;">
+                  ✓ ACCEPT INVITATION
+                </a>
+              </td>
+              <td>
+                <a href="${rejectUrl}" style="display:inline-block;background:#ffffff;color:#0A0A0A;font-family:'Courier New',monospace;font-weight:900;font-size:12px;text-transform:uppercase;letter-spacing:2px;padding:14px 28px;text-decoration:none;border:2px solid #0A0A0A;box-shadow:4px 4px 0 #0A0A0A;">
+                  ✕ DECLINE
+                </a>
+              </td>
+            </tr>
+          </table>
+
+          <p style="margin:0 0 8px;font-size:12px;color:#777;font-family:'Courier New',monospace;">
+            Or visit: <a href="${viewUrl}" style="color:#0A0A0A;font-weight:700;">${viewUrl}</a>
+          </p>
+          <p style="margin:0;font-size:11px;color:#999;font-family:'Courier New',monospace;">
+            This invitation expires on <strong>${expiry}</strong>.
+          </p>
+        </td>
+      </tr>
+
+      <!-- Footer -->
+      <tr>
+        <td style="background:#F5F5F0;border-top:2px solid #0A0A0A;padding:16px 32px;">
+          <p style="margin:0;font-size:10px;color:#888;font-family:'Courier New',monospace;text-align:center;text-transform:uppercase;letter-spacing:1px;">
+            Research Citadel · Automated system message · Do not reply
+          </p>
+        </td>
+      </tr>
+    </table>
+  </td></tr>
+</table>
+</body>
+</html>`;
+
+    await this.transporter.sendMail({
+      from: this.configService.get<string>('EMAIL'),
+      to: payload.toEmail,
+      subject: `Research Citadel — You've been invited to "${payload.vaultName}"`,
+      html,
+    });
+  }
+
+  async sendInvitationResponseEmail(payload: {
+    toEmail: string;
+    toName: string;
+    respondentName: string;
+    vaultName: string;
+    action: 'accepted' | 'rejected';
+  }) {
+    const isAccepted = payload.action === 'accepted';
+    const statusColor  = isAccepted ? '#10B981' : '#EF4444';
+    const statusBg     = isAccepted ? '#D1FAE5' : '#FEE2E2';
+    const statusLabel  = isAccepted ? 'ACCEPTED' : 'DECLINED';
+    const statusIcon   = isAccepted ? '✓' : '✕';
+
+    const html = `
+<!DOCTYPE html>
+<html lang="en">
+<head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Invitation Response</title></head>
+<body style="margin:0;padding:0;background:#FAFAF8;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Arial,sans-serif;">
+<table width="100%" cellpadding="0" cellspacing="0" style="background:#FAFAF8;padding:40px 20px;">
+  <tr><td align="center">
+    <table width="560" cellpadding="0" cellspacing="0" style="background:#ffffff;border:3px solid #0A0A0A;box-shadow:6px 6px 0px #0A0A0A;border-radius:4px;overflow:hidden;">
+
+      <!-- Header -->
+      <tr>
+        <td style="background:#FACC15;border-bottom:3px solid #0A0A0A;padding:24px 32px;">
+          <span style="font-family:'Courier New',monospace;font-size:11px;font-weight:900;letter-spacing:3px;color:#0A0A0A;text-transform:uppercase;">RESEARCH CITADEL</span>
+          <div style="font-size:20px;font-weight:900;color:#0A0A0A;margin-top:4px;text-transform:uppercase;">Invitation Response</div>
+        </td>
+      </tr>
+
+      <!-- Body -->
+      <tr>
+        <td style="padding:32px;">
+          <p style="margin:0 0 20px;font-size:16px;color:#0A0A0A;font-weight:700;line-height:1.5;">
+            Hi <strong>${payload.toName}</strong>,
+          </p>
+          <p style="margin:0 0 24px;font-size:15px;color:#333;line-height:1.6;">
+            <strong>${payload.respondentName}</strong> has responded to your invitation to join
+            <strong style="font-family:'Courier New',monospace;">${payload.vaultName}</strong>.
+          </p>
+
+          <!-- Status badge -->
+          <table cellpadding="0" cellspacing="0" style="margin:0 0 24px;">
+            <tr>
+              <td style="background:${statusBg};border:2px solid ${statusColor};padding:14px 24px;box-shadow:3px 3px 0 ${statusColor};">
+                <span style="font-family:'Courier New',monospace;font-size:20px;font-weight:900;color:${statusColor};">
+                  ${statusIcon} ${statusLabel}
+                </span>
+              </td>
+            </tr>
+          </table>
+
+          <p style="margin:0;font-size:13px;color:#777;line-height:1.6;">
+            ${isAccepted
+              ? `${payload.respondentName} has joined your vault. They now have access as a member.`
+              : `${payload.respondentName} has declined your invitation. You can invite them again or choose a different collaborator.`
+            }
+          </p>
+        </td>
+      </tr>
+
+      <!-- Footer -->
+      <tr>
+        <td style="background:#F5F5F0;border-top:2px solid #0A0A0A;padding:16px 32px;">
+          <p style="margin:0;font-size:10px;color:#888;font-family:'Courier New',monospace;text-align:center;text-transform:uppercase;letter-spacing:1px;">
+            Research Citadel · Automated system message · Do not reply
+          </p>
+        </td>
+      </tr>
+    </table>
+  </td></tr>
+</table>
+</body>
+</html>`;
+
+    await this.transporter.sendMail({
+      from: this.configService.get<string>('EMAIL'),
+      to: payload.toEmail,
+      subject: `Research Citadel — ${payload.respondentName} has ${payload.action} your invitation`,
+      html,
+    });
+  }
+
   async sendOtpEmail(email: string, otp: string, type: OtpType) {
     try {
       let subject = '';
@@ -110,7 +302,7 @@ export class MailerService {
       `;
 
       const mailOptions = {
-        from: 'danishsidd203@gmail.com',
+        from: this.configService.get<string>('EMAIL_FROM'),
         to: email,
         html,
         subject,
