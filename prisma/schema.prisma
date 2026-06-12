@@ -15,6 +15,18 @@ enum LoginProvider {
   GOOGLE
 }
 
+enum Plan {
+  FREE
+  PRO
+}
+
+enum AiOperationType {
+  SUMMARIZATION
+  INSIGHTS
+  QA
+  MARKDOWN_ENHANCE
+}
+
 model User {
   id            String        @id @unique @default(uuid()) @db.Uuid
   name          String
@@ -27,6 +39,7 @@ model User {
 
   hasNotifications Boolean @default(false)
   isEmailVerified  Boolean @default(false)
+  plan             Plan    @default(FREE)
 
   lastLoginAt  DateTime?
   lastActiveAt DateTime?
@@ -37,6 +50,7 @@ model User {
 
   otpVerifications   OtpVerification[]
   verificationTokens VerificationToken[]
+  aiUsageLogs        AiUsageLog[]
   userProfile        UserProfile?        @relation("UserProfile")
 
   // SyncScript Relations
@@ -136,6 +150,23 @@ model VerificationToken {
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@index([userId])
+}
+
+model AiUsageLog {
+  id               String          @id @unique @default(uuid()) @db.Uuid
+  userId           String          @db.Uuid
+  operation        AiOperationType
+  promptTokens     Int             @default(0)
+  completionTokens Int             @default(0)
+  totalTokens      Int             @default(0)
+  computeUnits     Float
+  metadata         Json?
+
+  createdAt DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, createdAt])
 }
 
 enum Gender {

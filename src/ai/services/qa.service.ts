@@ -4,6 +4,7 @@ import { throwError } from 'src/common/utils/helpers';
 import { GeminiService } from './gemini.service';
 import { QaAnswerDto, CitedSourceDto } from '../dto/qa.dto';
 import { QA_SYSTEM_INSTRUCTION, buildQaPrompt } from '../prompts/qa.prompt';
+import { buildTracking } from '../utils/tracking.util';
 
 /** Number of top chunks to pass as context */
 const TOP_K = 5;
@@ -24,6 +25,7 @@ export class QaService {
    * Uses TF-IDF cosine similarity for retrieval — no embedding API calls.
    */
   async answerQuestion(
+    userId: string,
     vaultId: string,
     question: string,
     sourceIds?: string[],
@@ -79,7 +81,8 @@ export class QaService {
     // 4. Generate answer with Gemini
     this.logger.log(`Generating answer from ${finalScored.length} context chunks`);
     const prompt = buildQaPrompt(question, contextChunks);
-    const answer = await this.geminiService.generateContent(prompt, QA_SYSTEM_INSTRUCTION);
+    const tracking = buildTracking(userId, 'QA', { vaultId, sourceIds });
+    const result = await this.geminiService.generateContent(prompt, QA_SYSTEM_INSTRUCTION, tracking);
 
     // 5. Build cited sources (deduplicated, best score per source)
     const sourceMap = new Map<string, CitedSourceDto>();
@@ -95,7 +98,7 @@ export class QaService {
     }
 
     return {
-      answer,
+      answer: result.text,
       sources: Array.from(sourceMap.values()).sort((a, b) => b.similarity - a.similarity),
       chunksUsed: finalScored.length,
     };

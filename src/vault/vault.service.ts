@@ -602,7 +602,7 @@ export class VaultService {
       });
       if (!member) throw throwError('Vault not found or access denied', HttpStatus.NOT_FOUND);
 
-      const answer = await this.qaService.answerQuestion(vaultId, question, sourceIds);
+      const answer = await this.qaService.answerQuestion(user.id, vaultId, question, sourceIds);
 
       return {
         message: 'Question answered successfully',

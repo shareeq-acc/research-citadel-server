@@ -49,7 +49,10 @@ export class AnnotationService {
       where: { id: sourceId, vaultId, deletedAt: null },
     });
     if (!source) throw throwError('Source not found', HttpStatus.NOT_FOUND);
-    const enhancedMarkdown = await this.markdownEnhanceService.enhanceMarkdown(contentMarkdown);
+    const enhancedMarkdown = await this.markdownEnhanceService.enhanceMarkdown(user.id, contentMarkdown, {
+      vaultId,
+      sourceId,
+    });
     return {
       message: 'Annotation content enhanced successfully',
       success: true,

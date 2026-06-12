@@ -1,7 +1,8 @@
-import { Injectable, Logger, HttpStatus } from '@nestjs/common';
+import { Injectable, Logger, HttpStatus, HttpException } from '@nestjs/common';
 import { throwError } from 'src/common/utils/helpers';
 import { GeminiService } from './gemini.service';
 import { SummaryLength } from '../dto/summarization.dto';
+import { buildTracking } from '../utils/tracking.util';
 import {
   SUMMARIZATION_SYSTEM_INSTRUCTION,
   generateFullTextSummaryPrompt,
@@ -35,9 +36,11 @@ export class SummarizationService {
    * Automatically handles large documents with chunking
    */
   async generateSummary(
+    userId: string,
     text: string,
     length: SummaryLength = SummaryLength.MEDIUM,
     metadata?: SummarizationMetadata,
+    sourceId?: string,
   ): Promise<string> {
     if (!text || text.trim().length === 0) {
       throw throwError('Cannot summarize empty text', HttpStatus.BAD_REQUEST);
@@ -49,13 +52,14 @@ export class SummarizationService {
     try {
       // For small to medium documents, use direct summarization
       if (trimmedText.length <= MAX_CHARS_PER_REQUEST) {
-        return await this.generateDirectSummary(trimmedText, length, metadata);
+        return await this.generateDirectSummary(userId, trimmedText, length, metadata, sourceId);
       }
 
       // For large documents, use chunked summarization
       this.logger.log('Text is large, using chunked summarization approach');
-      return await this.generateChunkedSummary(trimmedText, length, metadata);
+      return await this.generateChunkedSummary(userId, trimmedText, length, metadata, sourceId);
     } catch (error) {
+      if (error instanceof HttpException) throw error;
       const message = error instanceof Error ? error.message : 'Summarization failed';
       this.logger.error(`Summarization failed: ${message}`, error instanceof Error ? error.stack : String(error));
       throw throwError(`Failed to generate summary: ${message}`, HttpStatus.INTERNAL_SERVER_ERROR);
@@ -66,28 +70,33 @@ export class SummarizationService {
    * Generate summary directly (for documents under the size limit)
    */
   private async generateDirectSummary(
+    userId: string,
     text: string,
     length: SummaryLength,
     metadata?: SummarizationMetadata,
+    sourceId?: string,
   ): Promise<string> {
-    // Use section-based approach for better accuracy
     const prompt = generateSectionBasedSummaryPrompt(text, length, metadata);
-    
-    const summary = await this.geminiService.generateContent(
+    const tracking = buildTracking(userId, 'SUMMARIZATION', { sourceId, mode: 'direct' });
+
+    const result = await this.geminiService.generateContent(
       prompt,
       SUMMARIZATION_SYSTEM_INSTRUCTION,
+      tracking,
     );
 
-    return summary;
+    return result.text;
   }
 
   /**
    * Generate summary for large documents using chunking
    */
   private async generateChunkedSummary(
+    userId: string,
     text: string,
     length: SummaryLength,
     metadata?: SummarizationMetadata,
+    sourceId?: string,
   ): Promise<string> {
     // Split text into overlapping chunks
     const chunks = this.splitIntoChunks(text, CHUNK_SIZE, CHUNK_OVERLAP);
@@ -98,22 +107,25 @@ export class SummarizationService {
     for (let i = 0; i < chunks.length; i++) {
       this.logger.log(`Summarizing chunk ${i + 1}/${chunks.length}`);
       const chunkPrompt = generateChunkSummaryPrompt(chunks[i], i, chunks.length);
+      const tracking = buildTracking(userId, 'SUMMARIZATION', { sourceId, mode: 'chunk', chunkIndex: i });
       const chunkSummary = await this.geminiService.generateContent(
         chunkPrompt,
         SUMMARIZATION_SYSTEM_INSTRUCTION,
+        tracking,
       );
-      chunkSummaries.push(chunkSummary);
+      chunkSummaries.push(chunkSummary.text);
     }
 
-    // Combine chunk summaries into final summary
     this.logger.log('Combining chunk summaries into final summary');
     const combinePrompt = generateCombineSummariesPrompt(chunkSummaries, length, metadata);
+    const combineTracking = buildTracking(userId, 'SUMMARIZATION', { sourceId, mode: 'combine' });
     const finalSummary = await this.geminiService.generateContent(
       combinePrompt,
       SUMMARIZATION_SYSTEM_INSTRUCTION,
+      combineTracking,
     );
 
-    return finalSummary;
+    return finalSummary.text;
   }
 
   /**

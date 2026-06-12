@@ -511,6 +511,7 @@ export class SourceService {
 
       // Generate summary using AI
       const summary = await this.summarizationService.generateSummary(
+        user.id,
         source.extractedText,
         summaryLength,
         {
@@ -518,6 +519,7 @@ export class SourceService {
           authors: source.authors,
           year: source.year ?? undefined,
         },
+        sourceId,
       );
 
       // Update source with summary
@@ -589,11 +591,16 @@ export class SourceService {
 
       this.logger.log(`Extracting insights for source ${sourceId}`);
 
-      const insights = await this.insightsService.extractInsights(source.extractedText, {
-        title: source.title,
-        authors: source.authors,
-        year: source.year ?? undefined,
-      });
+      const insights = await this.insightsService.extractInsights(
+        user.id,
+        source.extractedText,
+        {
+          title: source.title,
+          authors: source.authors,
+          year: source.year ?? undefined,
+        },
+        sourceId,
+      );
 
       const updated = await this.prismaService.source.update({
         where: { id: sourceId },

@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Param, Put, Query, UploadedFile, UseGuards, UseInterceptors } from '@nestjs/common';
+import { Body, Controller, Get, Param, Post, Put, Query, UploadedFile, UseGuards, UseInterceptors } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { ApiConsumes, ApiParam, ApiProperty, ApiQuery, ApiTags } from '@nestjs/swagger';
 import { AuthGuard } from 'src/common/guards/auth.guard';
@@ -7,7 +7,9 @@ import { User } from '@prisma/client';
 import { CurrentUser } from 'src/common/decorators/current-user.decorator';
 import { QueryParams, MulterFile, ApiResponse } from 'src/common/types';
 import { UpdateUserDto } from './dto/user.dto';
+import { UpgradePlanDto } from './dto/upgrade-plan.dto';
 import { UserSelect } from './queries';
+import { UserWithAiUsage } from './user.service';
 import { GetAllUserResponse, CompleteUserProfileResponse } from './types';
 import { RedisService } from 'src/common/services/redis.service';
 
@@ -67,10 +69,10 @@ export class UserController {
 
   @ApiProperty({ title: 'Get Current User', description: 'Get current authenticated user' })
   @Get('me')
-  async getCurrentUser(@CurrentUser() user: User): Promise<ApiResponse<UserSelect>> {
+  async getCurrentUser(@CurrentUser() user: User): Promise<ApiResponse<UserWithAiUsage>> {
     const cacheKey = this.getCacheKey('current', user.id);
 
-    const cached = await this.redisService.get<ApiResponse<UserSelect>>(cacheKey);
+    const cached = await this.redisService.get<ApiResponse<UserWithAiUsage>>(cacheKey);
     if (cached) return cached;
 
     const response = await this.userService.getCurrentUser(user);
@@ -93,6 +95,17 @@ export class UserController {
   @Put('me/avatar')
   async updateAvatar(@CurrentUser() user: User, @UploadedFile() avatar: MulterFile): Promise<ApiResponse<UserSelect>> {
     const response = await this.userService.updateAvatar(user, avatar);
+    await this.invalidateUserCache(user.id);
+    return response;
+  }
+
+  @ApiProperty({ title: 'Upgrade Plan', description: 'Switch between FREE and PRO tiers' })
+  @Post('upgrade')
+  async upgradePlan(
+    @CurrentUser() user: User,
+    @Body() dto: UpgradePlanDto,
+  ): Promise<ApiResponse<UserWithAiUsage>> {
+    const response = await this.userService.upgradePlan(user, dto);
     await this.invalidateUserCache(user.id);
     return response;
   }

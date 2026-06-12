@@ -1,4 +1,4 @@
-import { Prisma, User } from '@prisma/client';
+import { Prisma, User, Plan } from '@prisma/client';
 import { HttpStatus, Injectable } from '@nestjs/common';
 import { PrismaService } from 'src/common/services/prisma.service';
 import { StorageService } from 'src/storage/storage.service';
@@ -8,6 +8,14 @@ import { throwError } from 'src/common/utils/helpers';
 import { userSelect, UserSelect, completeUserSelect, CompleteUserSelect } from './queries';
 import { GetAllUserResponse, CompleteUserProfileResponse } from './types';
 import { UpdateUserDto } from './dto/user.dto';
+import { UpgradePlanDto } from './dto/upgrade-plan.dto';
+import { AiUsageService } from 'src/ai/services/ai-usage.service';
+import { AiUsageSummary } from 'src/ai/constants/ai-usage.constants';
+
+export type UserWithAiUsage = UserSelect & {
+  plan: Plan;
+  aiUsage: AiUsageSummary;
+};
 
 @Injectable()
 export class UserService {
@@ -16,7 +24,14 @@ export class UserService {
   constructor(
     private readonly prismaService: PrismaService,
     private readonly storageService: StorageService,
+    private readonly aiUsageService: AiUsageService,
   ) {}
+
+  private async enrichUserWithUsage(user: UserSelect & { plan?: Plan }): Promise<UserWithAiUsage> {
+    const plan = user.plan ?? Plan.FREE;
+    const aiUsage = await this.aiUsageService.getUsageSummary(user.id, plan);
+    return { ...user, plan, aiUsage };
+  }
 
   private async populateUserImages(user: UserSelect): Promise<UserSelect> {
     return {
@@ -92,21 +107,22 @@ export class UserService {
     }
   }
 
-  async getCurrentUser(user: User): Promise<ApiResponse<UserSelect>> {
+  async getCurrentUser(user: User): Promise<ApiResponse<UserWithAiUsage>> {
     try {
       const currentUser = await this.prismaService.user.findUnique({
         where: { id: user.id },
-        select: userSelect,
+        select: { ...userSelect, plan: true },
       });
 
       if (!currentUser) throw throwError('User not found', HttpStatus.NOT_FOUND);
 
       const userWithImage = await this.populateUserImages(currentUser);
+      const enriched = await this.enrichUserWithUsage(userWithImage);
 
       return {
         message: 'User retrieved successfully',
         success: true,
-        data: userWithImage,
+        data: enriched,
       };
     } catch (err) {
       this.logger.error('Failed to retrieve user', err.stack, UserService.name);
@@ -299,6 +315,28 @@ export class UserService {
         err.message || 'Failed to retrieve user profile',
         err.status || HttpStatus.INTERNAL_SERVER_ERROR,
       );
+    }
+  }
+
+  async upgradePlan(user: User, { plan }: UpgradePlanDto): Promise<ApiResponse<UserWithAiUsage>> {
+    try {
+      const updatedUser = await this.prismaService.user.update({
+        where: { id: user.id },
+        data: { plan },
+        select: { ...userSelect, plan: true },
+      });
+
+      const userWithImage = await this.populateUserImages(updatedUser);
+      const enriched = await this.enrichUserWithUsage(userWithImage);
+
+      return {
+        message: `Plan updated to ${plan}`,
+        success: true,
+        data: enriched,
+      };
+    } catch (err) {
+      this.logger.error('Failed to upgrade plan', err.stack, UserService.name);
+      throw throwError(err.message || 'Failed to upgrade plan', err.status || HttpStatus.INTERNAL_SERVER_ERROR);
     }
   }
 }

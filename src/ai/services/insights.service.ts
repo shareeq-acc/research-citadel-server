@@ -1,7 +1,8 @@
-import { Injectable, Logger, HttpStatus } from '@nestjs/common';
+import { Injectable, Logger, HttpStatus, HttpException } from '@nestjs/common';
 import { throwError } from 'src/common/utils/helpers';
 import { GeminiService } from './gemini.service';
 import { InsightsDto } from '../dto/insights.dto';
+import { buildTracking } from '../utils/tracking.util';
 import {
   INSIGHTS_SYSTEM_INSTRUCTION,
   generateInsightsPrompt,
@@ -29,7 +30,12 @@ export class InsightsService {
    * Extract structured insights from document text.
    * Automatically handles large documents via chunking.
    */
-  async extractInsights(text: string, metadata?: InsightsMetadata): Promise<InsightsDto> {
+  async extractInsights(
+    userId: string,
+    text: string,
+    metadata?: InsightsMetadata,
+    sourceId?: string,
+  ): Promise<InsightsDto> {
     if (!text?.trim()) {
       throw throwError('Cannot extract insights from empty text', HttpStatus.BAD_REQUEST);
     }
@@ -39,14 +45,13 @@ export class InsightsService {
 
     try {
       if (trimmed.length <= MAX_CHARS_DIRECT) {
-        return await this.extractDirect(trimmed, metadata);
+        return await this.extractDirect(userId, trimmed, metadata, sourceId);
       }
 
       this.logger.log('Document is large — using chunked extraction');
-      return await this.extractChunked(trimmed, metadata);
+      return await this.extractChunked(userId, trimmed, metadata, sourceId);
     } catch (error) {
-      // Re-throw known HTTP errors as-is
-      if (error?.status) throw error;
+      if (error instanceof HttpException) throw error;
       const message = error instanceof Error ? error.message : 'Insights extraction failed';
       this.logger.error(`Insights extraction failed: ${message}`, error instanceof Error ? error.stack : String(error));
       throw throwError(`Failed to extract insights: ${message}`, HttpStatus.INTERNAL_SERVER_ERROR);
@@ -55,13 +60,24 @@ export class InsightsService {
 
   // ─── Private helpers ────────────────────────────────────────────────────────
 
-  private async extractDirect(text: string, metadata?: InsightsMetadata): Promise<InsightsDto> {
+  private async extractDirect(
+    userId: string,
+    text: string,
+    metadata?: InsightsMetadata,
+    sourceId?: string,
+  ): Promise<InsightsDto> {
     const prompt = generateInsightsPrompt(text, metadata);
-    const raw = await this.geminiService.generateContent(prompt, INSIGHTS_SYSTEM_INSTRUCTION);
-    return this.parseAndValidate(raw);
+    const tracking = buildTracking(userId, 'INSIGHTS', { sourceId, mode: 'direct' });
+    const raw = await this.geminiService.generateContent(prompt, INSIGHTS_SYSTEM_INSTRUCTION, tracking);
+    return this.parseAndValidate(raw.text);
   }
 
-  private async extractChunked(text: string, metadata?: InsightsMetadata): Promise<InsightsDto> {
+  private async extractChunked(
+    userId: string,
+    text: string,
+    metadata?: InsightsMetadata,
+    sourceId?: string,
+  ): Promise<InsightsDto> {
     const chunks = this.splitIntoChunks(text, CHUNK_SIZE, CHUNK_OVERLAP);
     this.logger.log(`Split into ${chunks.length} chunks`);
 
@@ -70,14 +86,16 @@ export class InsightsService {
     for (let i = 0; i < chunks.length; i++) {
       this.logger.log(`Processing chunk ${i + 1}/${chunks.length}`);
       const prompt = generateChunkInsightsPrompt(chunks[i], i, chunks.length);
-      const raw = await this.geminiService.generateContent(prompt, INSIGHTS_SYSTEM_INSTRUCTION);
-      partialResults.push(raw);
+      const tracking = buildTracking(userId, 'INSIGHTS', { sourceId, mode: 'chunk', chunkIndex: i });
+      const raw = await this.geminiService.generateContent(prompt, INSIGHTS_SYSTEM_INSTRUCTION, tracking);
+      partialResults.push(raw.text);
     }
 
     this.logger.log('Merging partial insights');
     const mergePrompt = generateMergeInsightsPrompt(partialResults, metadata);
-    const merged = await this.geminiService.generateContent(mergePrompt, INSIGHTS_SYSTEM_INSTRUCTION);
-    return this.parseAndValidate(merged);
+    const mergeTracking = buildTracking(userId, 'INSIGHTS', { sourceId, mode: 'merge' });
+    const merged = await this.geminiService.generateContent(mergePrompt, INSIGHTS_SYSTEM_INSTRUCTION, mergeTracking);
+    return this.parseAndValidate(merged.text);
   }
 
   /**
