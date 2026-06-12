@@ -32,6 +32,13 @@ export class RegisterDto {
   password: string;
 }
 
+export class ConfirmEmailDto {
+  @IsNotEmpty({ message: 'Verification token is required' })
+  @IsString({ message: 'Verification token must be a string' })
+  @ApiProperty({ type: String, required: true, example: 'a1b2c3d4e5f6...' })
+  token: string;
+}
+
 export class LoginDto {
   @IsEmail({}, { message: 'Invalid email' })
   @IsNotEmpty({ message: 'Email is required' })

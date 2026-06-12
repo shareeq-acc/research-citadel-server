@@ -4,10 +4,16 @@ import { PrismaService } from 'src/common/services/prisma.service';
 import { AppLoggerService } from 'src/common/services/logger.service';
 import { RedisService } from 'src/common/services/redis.service';
 import { LoginDto, RegisterDto } from './dto/auth.dto';
-import { JwtPayload, LoginUserResponse, OtpVerificationResponse, RegisterUserResponse } from './types';
+import {
+  ConfirmEmailResponse,
+  JwtPayload,
+  LoginUserResponse,
+  OtpVerificationResponse,
+  RegisterUserResponse,
+} from './types';
 import { generateSecureOTP, throwError } from 'src/common/utils/helpers';
 import { ApiResponse } from 'src/common/types';
-import { generateSecureToken, hashPassword, verifyPassword } from 'src/common/utils/hash';
+import { generateSecureToken, generateUrlSafeToken, hashPassword, verifyPassword } from 'src/common/utils/hash';
 import { CookieOptions } from 'express';
 import { OtpChannel, OtpType, RateLimitAction, User } from '@prisma/client';
 import { ForgotPasswordDto, ResetPasswordDto } from './dto/password.dto';
@@ -15,6 +21,7 @@ import {
   OTP_EXPIRATION_TIME,
   OTP_MAX_ATTEMPTS,
   OTP_RESEND_INTERVAL,
+  EMAIL_VERIFICATION_TOKEN_EXPIRATION,
   PASSWORD_RESET_TOKEN_EXPIRATION,
   RATE_LIMIT_MAX_REQUESTS,
   RATE_LIMIT_WINDOW,
@@ -24,7 +31,7 @@ import * as bcrypt from 'bcryptjs';
 import { InjectQueue } from '@nestjs/bullmq';
 import { Queue } from 'bullmq';
 import { QUEUE_NAMES, EMAIL_QUEUE_JOBS } from './constants/queue.constants';
-import { SendOtpEmailJobData } from './processors/email.processor';
+import { SendEmailVerificationLinkJobData, SendOtpEmailJobData } from './processors/email.processor';
 
 @Injectable()
 export class AuthService {
@@ -34,7 +41,8 @@ export class AuthService {
     private readonly prisma: PrismaService,
     private readonly jwtService: JwtService,
     private readonly redisService: RedisService,
-    @InjectQueue(QUEUE_NAMES.EMAIL) private readonly emailQueue: Queue<SendOtpEmailJobData>,
+    @InjectQueue(QUEUE_NAMES.EMAIL)
+    private readonly emailQueue: Queue<SendOtpEmailJobData | SendEmailVerificationLinkJobData>,
   ) {}
 
   private async signJwtTokenToCookies(res: Response, payload: JwtPayload): Promise<string> {
@@ -230,6 +238,14 @@ export class AuthService {
   async sendOtp(req: Request, dto: SendOtpDto): Promise<ApiResponse<string>> {
     try {
       const { email, type, otpChannel } = dto;
+
+      if (type === OtpType.EMAIL_VERIFICATION) {
+        throw throwError(
+          'Email verification uses a secure link. Please request a new verification email from your account.',
+          HttpStatus.BAD_REQUEST,
+        );
+      }
+
       const { ipAddress, userAgent } = this.getClientIpAndUserAgent(req);
 
       const user = await this.prisma.user.findUnique({
@@ -397,6 +413,14 @@ export class AuthService {
   async verifyOtp(req: Request, dto: VerifyOtpDto): Promise<ApiResponse<OtpVerificationResponse>> {
     try {
       const { otp, email, otpChannel, type } = dto;
+
+      if (type === OtpType.EMAIL_VERIFICATION) {
+        throw throwError(
+          'Email verification uses a secure link. Please check your inbox for the verification email.',
+          HttpStatus.BAD_REQUEST,
+        );
+      }
+
       const { ipAddress, userAgent } = this.getClientIpAndUserAgent(req);
 
       const user = await this.prisma.user.findUnique({
@@ -569,6 +593,61 @@ export class AuthService {
     });
   }
 
+  private async sendEmailVerificationLink(req: Request, user: User): Promise<void> {
+    await this.checkRateLimit(user.email, RateLimitAction.SEND_OTP);
+
+    const existingToken = await this.prisma.verificationToken.findFirst({
+      where: {
+        userId: user.id,
+        type: OtpType.EMAIL_VERIFICATION,
+        used: false,
+        expiresAt: { gt: new Date() },
+      },
+      orderBy: { createdAt: 'desc' },
+    });
+
+    if (existingToken) {
+      const timeSinceLastToken = Date.now() - existingToken.createdAt.getTime();
+      if (timeSinceLastToken < OTP_RESEND_INTERVAL) {
+        await this.updateRateLimit(user.email, RateLimitAction.SEND_OTP);
+        throw throwError(
+          `Please wait ${Math.ceil((OTP_RESEND_INTERVAL - timeSinceLastToken) / 1000)} seconds before requesting a new verification email`,
+          HttpStatus.TOO_MANY_REQUESTS,
+        );
+      }
+    }
+
+    await this.prisma.verificationToken.deleteMany({
+      where: {
+        userId: user.id,
+        type: OtpType.EMAIL_VERIFICATION,
+        used: false,
+      },
+    });
+
+    const token = generateUrlSafeToken(32);
+    const expiresAt = new Date(Date.now() + EMAIL_VERIFICATION_TOKEN_EXPIRATION);
+
+    await this.prisma.verificationToken.create({
+      data: {
+        userId: user.id,
+        token,
+        type: OtpType.EMAIL_VERIFICATION,
+        expiresAt,
+      },
+    });
+
+    this.logger.log(`Queueing email verification link for ${user.email}`);
+    await Promise.all([
+      this.emailQueue.add(EMAIL_QUEUE_JOBS.SEND_EMAIL_VERIFICATION_LINK, {
+        email: user.email,
+        name: user.name,
+        token,
+      } as SendEmailVerificationLinkJobData),
+      this.updateRateLimit(user.email, RateLimitAction.SEND_OTP),
+    ]);
+  }
+
   async verifyEmail(req: Request, user: User): Promise<ApiResponse> {
     try {
       if (user.isEmailVerified)
@@ -577,11 +656,7 @@ export class AuthService {
           success: true,
         };
 
-      await this.sendOtp(req, {
-        email: user.email,
-        type: OtpType.EMAIL_VERIFICATION,
-        otpChannel: OtpChannel.EMAIL,
-      });
+      await this.sendEmailVerificationLink(req, user);
 
       return {
         message: 'Verification email sent successfully',
@@ -597,6 +672,63 @@ export class AuthService {
         email: user.email,
       });
       throw throwError(err.message || 'Failed to verify email', err.status || HttpStatus.INTERNAL_SERVER_ERROR);
+    }
+  }
+
+  async confirmEmailVerification(token: string): Promise<ApiResponse<ConfirmEmailResponse>> {
+    try {
+      const verificationToken = await this.prisma.verificationToken.findFirst({
+        where: {
+          token,
+          type: OtpType.EMAIL_VERIFICATION,
+          used: false,
+          expiresAt: { gt: new Date() },
+        },
+        include: { user: true },
+      });
+
+      if (!verificationToken) {
+        throw throwError('Invalid or expired verification link', HttpStatus.BAD_REQUEST);
+      }
+
+      if (verificationToken.user.isEmailVerified) {
+        await this.prisma.verificationToken.update({
+          where: { id: verificationToken.id },
+          data: { used: true },
+        });
+
+        const user = await this.prisma.user.findUniqueOrThrow({
+          where: { id: verificationToken.userId },
+          omit: { password: true, salt: true },
+        });
+
+        return {
+          message: 'Email already verified',
+          success: true,
+          data: { user },
+        };
+      }
+
+      const updatedUser = await this.handleVerifyEmail(verificationToken.userId);
+
+      await this.prisma.verificationToken.update({
+        where: { id: verificationToken.id },
+        data: { used: true },
+      });
+
+      return {
+        message: 'Email verified successfully',
+        success: true,
+        data: { user: updatedUser },
+      };
+    } catch (err) {
+      this.logger.error('Email confirmation failed', err.stack, AuthService.name);
+      this.logger.logData({
+        error: err.message,
+        status: err.status || HttpStatus.INTERNAL_SERVER_ERROR,
+        method: 'confirmEmailVerification',
+      });
+      throw throwError(err.message || 'Email confirmation failed', err.status || HttpStatus.INTERNAL_SERVER_ERROR);
     }
   }
 

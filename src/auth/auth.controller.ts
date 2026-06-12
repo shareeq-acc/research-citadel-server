@@ -1,9 +1,9 @@
 import { Body, Controller, Post, Put, Req, Res, UseGuards } from '@nestjs/common';
 import { ApiOperation, ApiProperty, ApiTags } from '@nestjs/swagger';
 import { AuthService } from './auth.service';
-import { LoginDto, RegisterDto } from './dto/auth.dto';
+import { ConfirmEmailDto, LoginDto, RegisterDto } from './dto/auth.dto';
 import { ApiResponse } from 'src/common/types';
-import { LoginUserResponse, RegisterUserResponse } from './types';
+import { ConfirmEmailResponse, LoginUserResponse, RegisterUserResponse } from './types';
 import { AuthGuard } from 'src/common/guards/auth.guard';
 import { User } from '@prisma/client';
 import { CurrentUser } from 'src/common/decorators/current-user.decorator';
@@ -66,9 +66,15 @@ export class AuthController {
 
   @Put('verify-email')
   @UseGuards(AuthGuard)
-  @ApiProperty({ title: 'Verify Email' })
+  @ApiProperty({ title: 'Send Email Verification Link' })
   async verifyEmail(@Req() request: Request, @CurrentUser() user: User) {
     return await this.authService.verifyEmail(request, user);
+  }
+
+  @Post('confirm-email')
+  @ApiProperty({ title: 'Confirm Email Verification', type: ConfirmEmailDto })
+  async confirmEmail(@Body() dto: ConfirmEmailDto): Promise<ApiResponse<ConfirmEmailResponse>> {
+    return await this.authService.confirmEmailVerification(dto.token);
   }
 
   @Post('send-otp')

@@ -4,6 +4,7 @@ export const RATE_LIMIT_WINDOW = 60 * 60 * 1000; // 1 hour
 export const RATE_LIMIT_MAX_REQUESTS = 5; // Maximum requests in the rate limit window
 export const OTP_RESEND_INTERVAL = 60 * 1000; // 1 minute
 export const PASSWORD_RESET_TOKEN_EXPIRATION = 15 * 60 * 1000; // 15 minutes
+export const EMAIL_VERIFICATION_TOKEN_EXPIRATION = 24 * 60 * 60 * 1000; // 24 hours
 
 export const EMAIL_TYPES = {
   VERIFY: 'verify',

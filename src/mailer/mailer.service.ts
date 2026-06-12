@@ -214,6 +214,86 @@ export class MailerService {
     });
   }
 
+  async sendEmailVerificationEmail(email: string, name: string, token: string) {
+    const baseDomain = this.configService.get<string>('BASE_DOMAIN') ?? 'http://localhost:3000';
+    const verifyUrl = `${baseDomain}/verify-email/${encodeURIComponent(token)}`;
+    const expiryHours = 24;
+
+    const html = `
+<!DOCTYPE html>
+<html lang="en">
+<head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Verify Your Email</title></head>
+<body style="margin:0;padding:0;background:#FFFDF0;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Arial,sans-serif;">
+<table width="100%" cellpadding="0" cellspacing="0" style="background:#FFFDF0;padding:40px 20px;">
+  <tr><td align="center">
+    <table width="560" cellpadding="0" cellspacing="0" style="background:#ffffff;border:4px solid #0A0A0A;box-shadow:8px 8px 0px #0A0A0A;border-radius:2px;overflow:hidden;">
+
+      <tr>
+        <td style="background:#FFD700;border-bottom:4px solid #0A0A0A;padding:24px 32px;">
+          <table width="100%" cellpadding="0" cellspacing="0">
+            <tr>
+              <td>
+                <span style="font-family:'Courier New',monospace;font-size:11px;font-weight:900;letter-spacing:3px;color:#0A0A0A;text-transform:uppercase;">RESEARCH CITADEL</span>
+                <div style="font-size:20px;font-weight:900;color:#0A0A0A;margin-top:4px;text-transform:uppercase;letter-spacing:-0.5px;">Verify Your Email</div>
+              </td>
+              <td align="right">
+                <span style="background:#0A0A0A;color:#FFD700;font-size:10px;font-weight:900;font-family:'Courier New',monospace;padding:4px 10px;letter-spacing:2px;text-transform:uppercase;">VERIFY</span>
+              </td>
+            </tr>
+          </table>
+        </td>
+      </tr>
+
+      <tr>
+        <td style="padding:32px;">
+          <p style="margin:0 0 8px;font-size:13px;color:#555;font-family:'Courier New',monospace;text-transform:uppercase;letter-spacing:1px;">Hello, ${name}</p>
+          <p style="margin:0 0 24px;font-size:16px;color:#0A0A0A;font-weight:700;line-height:1.5;">
+            Welcome to <strong>Research Citadel</strong>. Click the button below to verify your email address and activate your scholar workspace.
+          </p>
+
+          <table cellpadding="0" cellspacing="0" style="margin:0 0 28px;">
+            <tr>
+              <td>
+                <a href="${verifyUrl}" style="display:inline-block;background:#FFD700;color:#0A0A0A;font-family:'Courier New',monospace;font-weight:900;font-size:12px;text-transform:uppercase;letter-spacing:2px;padding:16px 32px;text-decoration:none;border:3px solid #0A0A0A;box-shadow:4px 4px 0 #0A0A0A;">
+                  ✓ VERIFY EMAIL ADDRESS
+                </a>
+              </td>
+            </tr>
+          </table>
+
+          <p style="margin:0 0 8px;font-size:12px;color:#777;font-family:'Courier New',monospace;line-height:1.6;">
+            Or copy and paste this link into your browser:
+          </p>
+          <p style="margin:0 0 24px;font-size:11px;color:#0A0A0A;font-family:'Courier New',monospace;word-break:break-all;background:#F0EDE0;border:2px solid #0A0A0A;padding:12px;">
+            ${verifyUrl}
+          </p>
+          <p style="margin:0;font-size:11px;color:#999;font-family:'Courier New',monospace;">
+            This link expires in <strong>${expiryHours} hours</strong>. If you did not create an account, you can safely ignore this email.
+          </p>
+        </td>
+      </tr>
+
+      <tr>
+        <td style="background:#F0EDE0;border-top:3px solid #0A0A0A;padding:16px 32px;">
+          <p style="margin:0;font-size:10px;color:#888;font-family:'Courier New',monospace;text-align:center;text-transform:uppercase;letter-spacing:1px;">
+            Research Citadel · Automated system message · Do not reply
+          </p>
+        </td>
+      </tr>
+    </table>
+  </td></tr>
+</table>
+</body>
+</html>`;
+
+    await this.transporter.sendMail({
+      from: this.configService.get<string>('EMAIL_FROM'),
+      to: email,
+      subject: 'Research Citadel — Verify your email address',
+      html,
+    });
+  }
+
   async sendOtpEmail(email: string, otp: string, type: OtpType) {
     try {
       let subject = '';

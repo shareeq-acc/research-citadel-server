@@ -18,3 +18,7 @@ export interface LoginUserResponse {
 export interface OtpVerificationResponse {
   token?: string;
 }
+
+export interface ConfirmEmailResponse {
+  user: Omit<User, 'password' | 'salt'>;
+}
