@@ -14,6 +14,8 @@ import { ChunkingService } from 'src/document/chunking.service';
 import { SummaryLength } from 'src/ai/dto/summarization.dto';
 import { sourceSelect, SourceSelect } from './queries';
 import { CreateSourceDto, UpdateSourceDto } from './dto';
+import { NotificationEventBus } from 'src/notification/notification-event.bus';
+import { NotificationEvents } from 'src/notification/events/notification.events';
 
 const SOURCE_UPLOAD_PREFIX = 'uploads/sources/';
 
@@ -76,6 +78,7 @@ export class SourceService {
     private readonly summarizationService: SummarizationService,
     private readonly insightsService: InsightsService,
     private readonly chunkingService: ChunkingService,
+    private readonly notificationEventBus: NotificationEventBus,
   ) {}
 
   private async ensureVaultMember(userId: string, vaultId: string): Promise<{ role: VaultRole }> {
@@ -550,6 +553,14 @@ export class SourceService {
 
       this.collaborationGateway.emitSourceUpdated(vaultId, updated);
 
+      this.notificationEventBus.emitEvent(NotificationEvents.AI_OPERATION_COMPLETE, {
+        userId: user.id,
+        vaultId,
+        sourceId,
+        sourceTitle: source.title,
+        operation: 'SUMMARIZATION',
+      });
+
       return {
         message: 'Summary generated successfully',
         success: true,
@@ -628,6 +639,14 @@ export class SourceService {
       });
 
       this.collaborationGateway.emitSourceUpdated(vaultId, updated);
+
+      this.notificationEventBus.emitEvent(NotificationEvents.AI_OPERATION_COMPLETE, {
+        userId: user.id,
+        vaultId,
+        sourceId,
+        sourceTitle: source.title,
+        operation: 'INSIGHTS',
+      });
 
       return {
         message: 'Insights extracted successfully',
@@ -746,6 +765,14 @@ export class SourceService {
       });
 
       const wordsExtracted = textToIndex!.split(/\s+/).length;
+
+      this.notificationEventBus.emitEvent(NotificationEvents.AI_OPERATION_COMPLETE, {
+        userId: user.id,
+        vaultId,
+        sourceId,
+        sourceTitle: source.title,
+        operation: 'EXTRACT_INDEX',
+      });
 
       return {
         message: `Text extracted and indexed: ${chunks.length} chunks created`,

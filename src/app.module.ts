@@ -16,6 +16,7 @@ import { DocumentModule } from './document/document.module';
 import { AiModule } from './ai/ai.module';
 import { ChatModule } from './chat/chat.module';
 import { InvitationModule } from './invitation/invitation.module';
+import { NotificationModule } from './notification/notification.module';
 
 @Module({
   imports: [
@@ -23,11 +24,12 @@ import { InvitationModule } from './invitation/invitation.module';
       isGlobal: true,
     }),
     BullMQModule,
+    CollaborationModule,
+    NotificationModule,
     AuthModule,
     StorageModule,
     UserModule,
     VaultModule,
-    CollaborationModule,
     SourceModule,
     AnnotationModule,
     CitationModule,
@@ -35,7 +37,6 @@ import { InvitationModule } from './invitation/invitation.module';
     DocumentModule,
     AiModule,
     ChatModule,
-    InvitationModule,
     InvitationModule,
   ],
   controllers: [AppController],

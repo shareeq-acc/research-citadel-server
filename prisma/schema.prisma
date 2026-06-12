@@ -66,6 +66,7 @@ model User {
   sentChatMessages VaultChatMessage[] @relation("VaultChatSender")
   sentInvitations      VaultInvitation[] @relation("InvitationSender")
   receivedInvitations  VaultInvitation[] @relation("InvitationReceiver")
+  notifications        Notification[]
 
   @@index([name])
   @@index([email])
@@ -166,6 +167,32 @@ model AiUsageLog {
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
+  @@index([userId, createdAt])
+}
+
+enum NotificationType {
+  INVITATION
+  VAULT_ACTIVITY
+  AI_COMPLETE
+  SYSTEM
+  SECURITY
+}
+
+model Notification {
+  id          String           @id @unique @default(uuid()) @db.Uuid
+  userId      String           @db.Uuid
+  type        NotificationType
+  title       String
+  description String
+  read        Boolean          @default(false)
+  metadata    Json?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, read])
   @@index([userId, createdAt])
 }
 

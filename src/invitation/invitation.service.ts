@@ -8,6 +8,8 @@ import { generateUrlSafeToken } from 'src/common/utils/hash';
 import { MailerService } from 'src/mailer/mailer.service';
 import { SendInvitationDto, RespondInvitationDto } from './dto/invitation.dto';
 import { ConfigService } from '@nestjs/config';
+import { NotificationEventBus } from 'src/notification/notification-event.bus';
+import { NotificationEvents } from 'src/notification/events/notification.events';
 
 const INVITATION_EXPIRY_DAYS = 7;
 
@@ -19,6 +21,7 @@ export class InvitationService {
     private readonly prisma: PrismaService,
     private readonly mailer: MailerService,
     private readonly config: ConfigService,
+    private readonly notificationEventBus: NotificationEventBus,
   ) {}
 
   // ── Send invitation ────────────────────────────────────────────────────────
@@ -86,6 +89,15 @@ export class InvitationService {
         role: dto.role,
         token,
         expiresAt,
+      });
+
+      this.notificationEventBus.emitEvent(NotificationEvents.INVITATION_SENT, {
+        invitedUserId: dto.invitedUserId,
+        invitationId: invitation.id,
+        vaultId,
+        vaultName: vault.name,
+        senderName: sender.name,
+        role: dto.role,
       });
 
       return {
@@ -158,6 +170,14 @@ export class InvitationService {
         respondentName: invitation.invitedUser.name,
         vaultName: invitation.vault.name,
         action: newStatus === InvitationStatus.ACCEPTED ? 'accepted' : 'rejected',
+      });
+
+      this.notificationEventBus.emitEvent(NotificationEvents.INVITATION_RESPONDED, {
+        senderId: invitation.invitedBy,
+        vaultId: invitation.vaultId,
+        vaultName: invitation.vault.name,
+        respondentName: invitation.invitedUser.name,
+        accepted: newStatus === InvitationStatus.ACCEPTED,
       });
 
       return {

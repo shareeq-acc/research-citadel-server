@@ -4,7 +4,8 @@ import { PrismaService } from 'src/common/services/prisma.service';
 import { AppLoggerService } from 'src/common/services/logger.service';
 import { ApiResponse } from 'src/common/types';
 import { throwError } from 'src/common/utils/helpers';
-import { CollaborationGateway } from 'src/collaboration/collaboration.gateway';
+import { NotificationEventBus } from 'src/notification/notification-event.bus';
+import { NotificationEvents } from 'src/notification/events/notification.events';
 import { QaService } from 'src/ai/services/qa.service';
 import { vaultSelect, VaultSelect, VaultWithMyRole, vaultSelectWithMembers, VaultWithMyRoleAndMembers, vaultMemberSelect, VaultMemberWithUser } from './queries';
 import { CreateVaultDto, UpdateVaultDto, AddVaultMemberDto } from './dto';
@@ -26,8 +27,8 @@ export class VaultService {
 
   constructor(
     private readonly prismaService: PrismaService,
-    private readonly collaborationGateway: CollaborationGateway,
     private readonly qaService: QaService,
+    private readonly notificationEventBus: NotificationEventBus,
   ) {}
 
   async findAllByUser(user: User): Promise<ApiResponse<VaultWithMyRole[]>> {
@@ -310,6 +311,13 @@ export class VaultService {
         },
       });
 
+      this.notificationEventBus.emitEvent(NotificationEvents.VAULT_MEMBER_REMOVED, {
+        userId: targetUserId,
+        vaultId,
+        vaultName: vault.name,
+        removedByName: user.name ?? 'Someone',
+      });
+
       return {
         message: 'Member removed successfully',
         success: true,
@@ -374,7 +382,8 @@ export class VaultService {
         },
       });
 
-      this.collaborationGateway.emitVaultAddedToUser(dto.userId, {
+      this.notificationEventBus.emitEvent(NotificationEvents.VAULT_MEMBER_ADDED, {
+        userId: dto.userId,
         vaultId,
         vaultName: vault.name,
         addedByName: user.name ?? 'Someone',

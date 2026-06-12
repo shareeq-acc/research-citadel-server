@@ -26,6 +26,7 @@ export const CollaborationEvents = {
   ANNOTATION_EDITING: 'annotation:editing',
   ANNOTATION_DRAFT: 'annotation:draft',
   NOTIFICATION_VAULT_ADDED: 'notification:vault_added',
+  NOTIFICATION_NEW: 'notification:new',
   // Chat
   CHAT_MESSAGE: 'chat:message',
   CHAT_MESSAGE_DELETED: 'chat:message_deleted',
@@ -385,6 +386,12 @@ export class CollaborationGateway
   ): void {
     if (!this.server) return;
     this.server.to(userRoom(userId)).emit(CollaborationEvents.NOTIFICATION_VAULT_ADDED, payload);
+  }
+
+  /** Push a persisted notification to a user's private room. */
+  emitNotificationToUser(userId: string, notification: object): void {
+    if (!this.server) return;
+    this.server.to(userRoom(userId)).emit(CollaborationEvents.NOTIFICATION_NEW, notification);
   }
 
   // ── Chat helpers ────────────────────────────────────────────────────────────

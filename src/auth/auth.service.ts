@@ -30,6 +30,8 @@ import { SendOtpDto, VerifyOtpDto } from './dto/otp.dto';
 import * as bcrypt from 'bcryptjs';
 import { InjectQueue } from '@nestjs/bullmq';
 import { Queue } from 'bullmq';
+import { NotificationEventBus } from 'src/notification/notification-event.bus';
+import { NotificationEvents } from 'src/notification/events/notification.events';
 import { QUEUE_NAMES, EMAIL_QUEUE_JOBS } from './constants/queue.constants';
 import { SendEmailVerificationLinkJobData, SendOtpEmailJobData } from './processors/email.processor';
 
@@ -43,6 +45,7 @@ export class AuthService {
     private readonly redisService: RedisService,
     @InjectQueue(QUEUE_NAMES.EMAIL)
     private readonly emailQueue: Queue<SendOtpEmailJobData | SendEmailVerificationLinkJobData>,
+    private readonly notificationEventBus: NotificationEventBus,
   ) {}
 
   private async signJwtTokenToCookies(res: Response, payload: JwtPayload): Promise<string> {
@@ -736,6 +739,10 @@ export class AuthService {
       await this.prisma.verificationToken.update({
         where: { id: verificationToken.id },
         data: { used: true },
+      });
+
+      this.notificationEventBus.emitEvent(NotificationEvents.EMAIL_VERIFIED, {
+        userId: verificationToken.userId,
       });
 
       return {
