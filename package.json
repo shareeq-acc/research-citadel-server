@@ -7,9 +7,9 @@
   "license": "UNLICENSED",
   "scripts": {
     "postinstall": "prisma generate",
-    "build": "nest build && node -e \"require('fs').cpSync('prisma/generated', 'dist/prisma/generated', {recursive: true})\"",
+    "build": "prisma generate && nest build",
     "format": "prettier --write \"src/**/*.ts\"",
-    "start": "nest build && node -e \"require('fs').cpSync('prisma/generated', 'dist/prisma/generated', {recursive: true})\" && node dist/src/main",
+    "start": "nest start",
     "start:dev": "nest start --watch",
     "start:debug": "nest start --debug --watch",
     "start:prod": "node dist/main",
