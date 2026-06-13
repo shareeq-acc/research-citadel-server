@@ -9,6 +9,25 @@ export class UpdateUserDto {
   name?: string;
 
   @IsOptional()
+  @IsString({ message: 'Avatar must be a string' })
+  @ApiProperty({
+    type: String,
+    required: false,
+    description: 'Avatar URL, custom-avatar:: JSON spec, or null for letter default',
+    example: 'custom-avatar::{"gender":"femme","bg":"#38BDF8"}',
+  })
+  avatar?: string | null;
+
+  @IsOptional()
+  @IsString({ message: 'Motto must be a string' })
+  @ApiProperty({
+    type: String,
+    required: false,
+    example: 'Grounded analysis, zero assumptions',
+  })
+  motto?: string;
+
+  @IsOptional()
   @IsEnum(Gender, { message: 'Gender must be a valid Gender enum value' })
   @ApiProperty({ type: String, enum: Gender, required: false, example: Gender.MALE })
   gender?: Gender;

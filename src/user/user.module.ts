@@ -4,10 +4,11 @@ import { UserService } from './user.service';
 import { PrismaService } from 'src/common/services/prisma.service';
 import { RedisService } from 'src/common/services/redis.service';
 import { StorageService } from 'src/storage/storage.service';
+import { CloudinaryModule } from 'src/cloudinary/cloudinary.module';
 import { AiModule } from 'src/ai/ai.module';
 
 @Module({
-  imports: [AiModule],
+  imports: [AiModule, CloudinaryModule],
   controllers: [UserController],
   providers: [UserService, PrismaService, RedisService, StorageService],
   exports: [UserService],

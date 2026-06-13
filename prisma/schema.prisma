@@ -33,6 +33,7 @@ model User {
   username      String        @unique
   email         String        @unique
   avatar        String?
+  motto         String?
   password      String?
   salt          String?
   loginProvider LoginProvider @default(EMAIL)

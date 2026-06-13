@@ -2,6 +2,7 @@ import { Prisma, User, Plan } from '@prisma/client';
 import { HttpStatus, Injectable } from '@nestjs/common';
 import { PrismaService } from 'src/common/services/prisma.service';
 import { StorageService } from 'src/storage/storage.service';
+import { CloudinaryService } from 'src/cloudinary/cloudinary.service';
 import { AppLoggerService } from 'src/common/services/logger.service';
 import { ApiResponse, QueryParams, MulterFile } from 'src/common/types';
 import { throwError } from 'src/common/utils/helpers';
@@ -24,20 +25,34 @@ export class UserService {
   constructor(
     private readonly prismaService: PrismaService,
     private readonly storageService: StorageService,
+    private readonly cloudinaryService: CloudinaryService,
     private readonly aiUsageService: AiUsageService,
   ) {}
 
-  private async enrichUserWithUsage(user: UserSelect & { plan?: Plan }): Promise<UserWithAiUsage> {
-    const plan = user.plan ?? Plan.FREE;
-    const aiUsage = await this.aiUsageService.getUsageSummary(user.id, plan);
-    return { ...user, plan, aiUsage };
+  private resolveAvatarForResponse(avatar: string | null): string | null {
+    if (!avatar) return null;
+    if (
+      avatar.startsWith('custom-avatar::') ||
+      avatar.startsWith('http://') ||
+      avatar.startsWith('https://') ||
+      avatar.startsWith('data:')
+    ) {
+      return avatar;
+    }
+    return this.storageService.getImageUrl(avatar);
   }
 
   private async populateUserImages(user: UserSelect): Promise<UserSelect> {
     return {
       ...user,
-      avatar: user.avatar ? this.storageService.getImageUrl(user.avatar) : null,
+      avatar: this.resolveAvatarForResponse(user.avatar),
     };
+  }
+
+  private async enrichUserWithUsage(user: UserSelect & { plan?: Plan }): Promise<UserWithAiUsage> {
+    const plan = user.plan ?? Plan.FREE;
+    const aiUsage = await this.aiUsageService.getUsageSummary(user.id, plan);
+    return { ...user, plan, aiUsage };
   }
 
   async getAllUsers(user: User, query?: QueryParams): Promise<ApiResponse<GetAllUserResponse>> {
@@ -145,11 +160,28 @@ export class UserService {
 
       if (!existingUser) throw throwError('User not found', HttpStatus.NOT_FOUND);
 
-      const { name, gender, age, address, city, state, country, postalCode, phone, website, bio, longitude, latitude } =
-        updateUserDto;
+      const {
+        name,
+        avatar,
+        motto,
+        gender,
+        age,
+        address,
+        city,
+        state,
+        country,
+        postalCode,
+        phone,
+        website,
+        bio,
+        longitude,
+        latitude,
+      } = updateUserDto;
 
       const userUpdateData: Prisma.UserUpdateInput = {};
       if (name !== undefined) userUpdateData.name = name;
+      if (avatar !== undefined) userUpdateData.avatar = avatar;
+      if (motto !== undefined) userUpdateData.motto = motto;
 
       const profileUpdateData: Prisma.UserProfileUpdateInput = {};
       if (gender !== undefined) profileUpdateData.gender = gender;
@@ -224,16 +256,11 @@ export class UserService {
 
       if (!existingUser) throw throwError('User not found', HttpStatus.NOT_FOUND);
 
-      const [uploadResult] = await Promise.all([
-        this.storageService.uploadFile(avatar),
-        existingUser.avatar ? this.storageService.removeFile(existingUser.avatar) : Promise.resolve(),
-      ]);
-
-      if (!uploadResult?.filename) throw throwError('Failed to upload avatar', HttpStatus.INTERNAL_SERVER_ERROR);
+      const imageUrl = await this.cloudinaryService.uploadImage(avatar, 'avatars');
 
       const updatedUser = await this.prismaService.user.update({
         where: { id: user.id },
-        data: { avatar: uploadResult.filename },
+        data: { avatar: imageUrl },
         select: userSelect,
       });
 
@@ -293,7 +320,7 @@ export class UserService {
 
       const userWithImage = {
         ...completeUser,
-        avatar: completeUser.avatar ? this.storageService.getImageUrl(completeUser.avatar) : null,
+        avatar: this.resolveAvatarForResponse(completeUser.avatar),
       };
 
       return {
