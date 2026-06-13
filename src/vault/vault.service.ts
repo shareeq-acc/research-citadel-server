@@ -8,7 +8,7 @@ import { NotificationEventBus } from 'src/notification/notification-event.bus';
 import { NotificationEvents } from 'src/notification/events/notification.events';
 import { QaService } from 'src/ai/services/qa.service';
 import { vaultSelect, VaultSelect, VaultWithMyRole, vaultSelectWithMembers, VaultWithMyRoleAndMembers, vaultMemberSelect, VaultMemberWithUser } from './queries';
-import { CreateVaultDto, UpdateVaultDto, AddVaultMemberDto } from './dto';
+import { CreateVaultDto, UpdateVaultDto, AddVaultMemberDto, mergeVaultPreferences, parseVaultPreferences, UpdateVaultPreferencesDto, VaultPreferencesDto } from './dto';
 import { VaultAuditStatsEntry } from './dto';
 
 /** Category → AuditAction prefix map — used for category-based audit log filtering */
@@ -54,12 +54,16 @@ export class VaultService {
       const vaultIds = vaults.map((v) => v.id);
       const memberships = await this.prismaService.vaultMember.findMany({
         where: { userId: user.id, vaultId: { in: vaultIds } },
-        select: { vaultId: true, role: true },
+        select: { vaultId: true, role: true, preferences: true },
       });
       const roleByVaultId = new Map(memberships.map((m) => [m.vaultId, m.role]));
+      const preferencesByVaultId = new Map(
+        memberships.map((m) => [m.vaultId, parseVaultPreferences(m.preferences)]),
+      );
       const data: VaultWithMyRole[] = vaults.map((v) => ({
         ...v,
         myRole: v.ownerId === user.id ? VaultRole.OWNER : (roleByVaultId.get(v.id) ?? VaultRole.VIEWER),
+        preferences: preferencesByVaultId.get(v.id) ?? { muted: false },
       }));
       return {
         message: 'Vaults retrieved successfully',
@@ -81,13 +85,14 @@ export class VaultService {
       if (!vault) throw throwError('Vault not found', HttpStatus.NOT_FOUND);
       const membership = await this.prismaService.vaultMember.findUnique({
         where: { vaultId_userId: { vaultId, userId: user.id } },
-        select: { role: true },
+        select: { role: true, preferences: true },
       });
       if (vault.ownerId !== user.id && !membership) {
         throw throwError('You do not have access to this vault', HttpStatus.FORBIDDEN);
       }
       const myRole = vault.ownerId === user.id ? VaultRole.OWNER : membership!.role;
-      const data: VaultWithMyRoleAndMembers = { ...vault, myRole };
+      const preferences = parseVaultPreferences(membership?.preferences);
+      const data: VaultWithMyRoleAndMembers = { ...vault, myRole, preferences };
       return {
         message: 'Vault retrieved successfully',
         success: true,
@@ -595,6 +600,81 @@ export class VaultService {
       if (err instanceof HttpException) throw err;
       this.logger.error('Failed to get vault audit stats', (err as Error)?.stack, VaultService.name);
       throw throwError((err as Error)?.message || 'Failed to get vault audit stats', HttpStatus.INTERNAL_SERVER_ERROR);
+    }
+  }
+
+  async getPreferences(user: User, vaultId: string): Promise<ApiResponse<VaultPreferencesDto>> {
+    try {
+      await this.assertVaultMember(user.id, vaultId);
+
+      const membership = await this.prismaService.vaultMember.findUnique({
+        where: { vaultId_userId: { vaultId, userId: user.id } },
+        select: { preferences: true },
+      });
+
+      return {
+        success: true,
+        message: 'Vault preferences retrieved successfully',
+        data: parseVaultPreferences(membership?.preferences),
+      };
+    } catch (err: unknown) {
+      if (err instanceof HttpException) throw err;
+      this.logger.error('Failed to get vault preferences', (err as Error)?.stack, VaultService.name);
+      throw throwError((err as Error)?.message || 'Failed to get vault preferences', HttpStatus.INTERNAL_SERVER_ERROR);
+    }
+  }
+
+  async updatePreferences(
+    user: User,
+    vaultId: string,
+    dto: UpdateVaultPreferencesDto,
+  ): Promise<ApiResponse<VaultPreferencesDto>> {
+    try {
+      await this.assertVaultMember(user.id, vaultId);
+
+      const membership = await this.prismaService.vaultMember.findUnique({
+        where: { vaultId_userId: { vaultId, userId: user.id } },
+        select: { preferences: true },
+      });
+
+      if (!membership) {
+        throw throwError('Vault membership not found', HttpStatus.NOT_FOUND);
+      }
+
+      const merged = mergeVaultPreferences(membership.preferences, dto);
+
+      await this.prismaService.vaultMember.update({
+        where: { vaultId_userId: { vaultId, userId: user.id } },
+        data: { preferences: merged as object },
+      });
+
+      return {
+        success: true,
+        message: 'Vault preferences updated successfully',
+        data: merged,
+      };
+    } catch (err: unknown) {
+      if (err instanceof HttpException) throw err;
+      this.logger.error('Failed to update vault preferences', (err as Error)?.stack, VaultService.name);
+      throw throwError((err as Error)?.message || 'Failed to update vault preferences', HttpStatus.INTERNAL_SERVER_ERROR);
+    }
+  }
+
+  private async assertVaultMember(userId: string, vaultId: string): Promise<void> {
+    const vault = await this.prismaService.vault.findFirst({
+      where: { id: vaultId, deletedAt: null },
+      select: { ownerId: true },
+    });
+    if (!vault) throw throwError('Vault not found', HttpStatus.NOT_FOUND);
+
+    if (vault.ownerId === userId) return;
+
+    const membership = await this.prismaService.vaultMember.findUnique({
+      where: { vaultId_userId: { vaultId, userId } },
+      select: { id: true },
+    });
+    if (!membership) {
+      throw throwError('You do not have access to this vault', HttpStatus.FORBIDDEN);
     }
   }
 

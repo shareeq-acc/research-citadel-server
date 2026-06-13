@@ -43,7 +43,12 @@ export type VaultSelect = {
 };
 
 /** Vault with the current user's role (OWNER, CONTRIBUTOR, or VIEWER) */
-export type VaultWithMyRole = VaultSelect & { myRole: string };
+export type VaultPreferences = { muted: boolean };
+
+export type VaultWithMyRole = VaultSelect & {
+  myRole: string;
+  preferences: VaultPreferences;
+};
 
 /** Member row with user details (for vault view) */
 export const vaultMemberSelect = {

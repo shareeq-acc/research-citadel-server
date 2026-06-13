@@ -5,7 +5,7 @@ import { VaultService } from './vault.service';
 import { User } from '@prisma/client';
 import { CurrentUser } from 'src/common/decorators/current-user.decorator';
 import { ApiResponse } from 'src/common/types';
-import { CreateVaultDto, UpdateVaultDto, AddVaultMemberDto, AuditLogResponseDto, AUDIT_ACTIONS, UserContributionStatsDto, VaultMemberResponseDto } from './dto';
+import { CreateVaultDto, UpdateVaultDto, AddVaultMemberDto, AuditLogResponseDto, AUDIT_ACTIONS, UserContributionStatsDto, VaultMemberResponseDto, UpdateVaultPreferencesDto, VaultPreferencesDto } from './dto';
 import { VaultSelect, VaultWithMyRole, VaultWithMyRoleAndMembers, VaultMemberWithUser } from './queries';
 import { AskQuestionDto, QaAnswerDto } from 'src/ai/dto/qa.dto';
 
@@ -145,6 +145,29 @@ export class VaultController {
     @Param('id', new ParseUUIDPipe({ version: '4' })) id: string,
   ): Promise<ApiResponse<VaultMemberWithUser[]>> {
     return this.vaultService.getMembers(user, id);
+  }
+
+  @Get(':id/preferences')
+  @ApiOperation({ summary: 'Get current user preferences for a vault' })
+  @ApiParam({ name: 'id', type: String, description: 'Vault UUID' })
+  @ApiResponseDoc({ status: 200, description: 'Preferences retrieved', type: VaultPreferencesDto })
+  async getPreferences(
+    @CurrentUser() user: User,
+    @Param('id', new ParseUUIDPipe({ version: '4' })) id: string,
+  ): Promise<ApiResponse<VaultPreferencesDto>> {
+    return this.vaultService.getPreferences(user, id);
+  }
+
+  @Put(':id/preferences')
+  @ApiOperation({ summary: 'Update current user preferences for a vault' })
+  @ApiParam({ name: 'id', type: String, description: 'Vault UUID' })
+  @ApiResponseDoc({ status: 200, description: 'Preferences updated', type: VaultPreferencesDto })
+  async updatePreferences(
+    @CurrentUser() user: User,
+    @Param('id', new ParseUUIDPipe({ version: '4' })) id: string,
+    @Body() dto: UpdateVaultPreferencesDto,
+  ): Promise<ApiResponse<VaultPreferencesDto>> {
+    return this.vaultService.updatePreferences(user, id, dto);
   }
 
   @Delete(':id/members/:userId')

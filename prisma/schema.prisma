@@ -282,6 +282,9 @@ model VaultMember {
   userId  String    @db.Uuid
   role    VaultRole
 
+  // Per-member vault settings (e.g. muted notifications)
+  preferences Json @default("{}")
+
   // Invitation tracking
   invitedBy  String?   @db.Uuid
   invitedAt  DateTime  @default(now())
