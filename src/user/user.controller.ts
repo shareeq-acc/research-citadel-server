@@ -8,6 +8,7 @@ import { CurrentUser } from 'src/common/decorators/current-user.decorator';
 import { QueryParams, MulterFile, ApiResponse } from 'src/common/types';
 import { UpdateUserDto } from './dto/user.dto';
 import { UpgradePlanDto } from './dto/upgrade-plan.dto';
+import { UpdateAlertPreferencesDto } from './dto/alert-preferences.dto';
 import { UserSelect } from './queries';
 import { UserWithAiUsage } from './user.service';
 import { GetAllUserResponse, CompleteUserProfileResponse } from './types';
@@ -106,6 +107,17 @@ export class UserController {
     @Body() dto: UpgradePlanDto,
   ): Promise<ApiResponse<UserWithAiUsage>> {
     const response = await this.userService.upgradePlan(user, dto);
+    await this.invalidateUserCache(user.id);
+    return response;
+  }
+
+  @ApiProperty({ title: 'Update Alert Preferences', description: 'Update email and in-app alert toggles' })
+  @Put('me/alerts')
+  async updateAlertPreferences(
+    @CurrentUser() user: User,
+    @Body() dto: UpdateAlertPreferencesDto,
+  ) {
+    const response = await this.userService.updateAlertPreferences(user, dto);
     await this.invalidateUserCache(user.id);
     return response;
   }

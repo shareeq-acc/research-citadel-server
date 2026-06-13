@@ -6,6 +6,13 @@ import { ApiResponse } from 'src/common/types';
 import { throwError } from 'src/common/utils/helpers';
 import { SendMessageDto, AddChatMemberDto, ChatMemberDto, ChatMessageDto } from './dto/chat.dto';
 import { CollaborationGateway } from 'src/collaboration/collaboration.gateway';
+import { NotificationEventBus } from 'src/notification/notification-event.bus';
+import { NotificationEvents } from 'src/notification/events/notification.events';
+
+function extractMentionedUsernames(content: string): string[] {
+  const matches = [...content.matchAll(/@([a-zA-Z0-9_]{2,30})\b/g)];
+  return [...new Set(matches.map((m) => m[1].toLowerCase()))];
+}
 
 // ── Prisma select shapes ──────────────────────────────────────────────────────
 
@@ -39,6 +46,7 @@ export class ChatService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly gateway: CollaborationGateway,
+    private readonly notificationEventBus: NotificationEventBus,
   ) {}
 
   // ── Guards ──────────────────────────────────────────────────────────────────
@@ -247,6 +255,9 @@ export class ChatService {
       });
 
       this.gateway.emitChatMessage(vaultId, message);
+
+      void this.notifyMentionedUsers(user, vaultId, dto.content);
+
       return { message: 'Message sent', success: true, data: message as unknown as ChatMessageDto };
     } catch (err: unknown) {
       if (err instanceof HttpException) throw err;
@@ -280,6 +291,49 @@ export class ChatService {
       if (err instanceof HttpException) throw err;
       this.logger.error('deleteMessage failed', (err as Error)?.stack, ChatService.name);
       throw throwError((err as Error)?.message || 'Failed to delete message', HttpStatus.INTERNAL_SERVER_ERROR);
+    }
+  }
+
+  private async notifyMentionedUsers(sender: User, vaultId: string, content: string): Promise<void> {
+    const usernames = extractMentionedUsernames(content);
+    if (usernames.length === 0) return;
+
+    const [vault, chatMembers, vaultMembers] = await Promise.all([
+      this.prisma.vault.findFirst({
+        where: { id: vaultId, deletedAt: null },
+        select: { name: true, ownerId: true, owner: { select: { id: true, username: true } } },
+      }),
+      this.prisma.vaultChatMember.findMany({
+        where: { vaultId },
+        select: { user: { select: { id: true, username: true } } },
+      }),
+      this.prisma.vaultMember.findMany({
+        where: { vaultId },
+        select: { user: { select: { id: true, username: true } } },
+      }),
+    ]);
+
+    if (!vault) return;
+
+    const eligibleUsers = new Map<string, { id: string; username: string }>();
+    if (vault.owner) eligibleUsers.set(vault.owner.username.toLowerCase(), vault.owner);
+    for (const m of [...chatMembers, ...vaultMembers]) {
+      eligibleUsers.set(m.user.username.toLowerCase(), m.user);
+    }
+
+    const preview = content.length > 120 ? `${content.slice(0, 117)}...` : content;
+
+    for (const username of usernames) {
+      const mentioned = eligibleUsers.get(username);
+      if (!mentioned || mentioned.id === sender.id) continue;
+
+      this.notificationEventBus.emit(NotificationEvents.CHAT_MENTION, {
+        mentionedUserId: mentioned.id,
+        vaultId,
+        vaultName: vault.name,
+        senderName: sender.name,
+        messagePreview: preview,
+      });
     }
   }
 }

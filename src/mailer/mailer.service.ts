@@ -394,4 +394,49 @@ export class MailerService {
       throw throwError(error.message || 'Failed to send OTP email', HttpStatus.INTERNAL_SERVER_ERROR);
     }
   }
+
+  async sendAlertEmail(payload: {
+    toEmail: string;
+    toName: string;
+    title: string;
+    description: string;
+    linkPath?: string;
+  }) {
+    const baseDomain = this.configService.get<string>('BASE_DOMAIN') ?? 'http://localhost:3000';
+    const actionUrl = payload.linkPath ? `${baseDomain}${payload.linkPath}` : `${baseDomain}/dashboard`;
+
+    const html = `
+<!DOCTYPE html>
+<html lang="en">
+<head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${payload.title}</title></head>
+<body style="margin:0;padding:0;background:#FAFAF8;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Arial,sans-serif;">
+<table width="100%" cellpadding="0" cellspacing="0" style="background:#FAFAF8;padding:40px 20px;">
+  <tr><td align="center">
+    <table width="560" cellpadding="0" cellspacing="0" style="background:#ffffff;border:3px solid #0A0A0A;box-shadow:6px 6px 0px #0A0A0A;border-radius:4px;overflow:hidden;">
+      <tr>
+        <td style="background:#FACC15;border-bottom:3px solid #0A0A0A;padding:24px 32px;">
+          <span style="font-family:'Courier New',monospace;font-size:11px;font-weight:900;letter-spacing:3px;color:#0A0A0A;text-transform:uppercase;">RESEARCH CITADEL</span>
+          <div style="font-size:20px;font-weight:900;color:#0A0A0A;margin-top:4px;text-transform:uppercase;letter-spacing:-0.5px;">${payload.title}</div>
+        </td>
+      </tr>
+      <tr>
+        <td style="padding:32px;">
+          <p style="margin:0 0 8px;font-size:13px;color:#555;font-family:'Courier New',monospace;text-transform:uppercase;letter-spacing:1px;">Hello, ${payload.toName}</p>
+          <p style="margin:0 0 24px;font-size:15px;color:#0A0A0A;line-height:1.6;">${payload.description}</p>
+          <a href="${actionUrl}" style="display:inline-block;background:#FACC15;color:#0A0A0A;font-weight:900;font-size:12px;font-family:'Courier New',monospace;text-transform:uppercase;letter-spacing:1px;padding:12px 24px;border:3px solid #0A0A0A;box-shadow:4px 4px 0 #0A0A0A;text-decoration:none;">View in Citadel</a>
+        </td>
+      </tr>
+    </table>
+  </td></tr>
+</table>
+</body>
+</html>`;
+
+    await this.transporter.sendMail({
+      from: this.configService.get<string>('EMAIL_FROM'),
+      to: payload.toEmail,
+      subject: `[Research Citadel] ${payload.title}`,
+      html,
+    });
+  }
 }

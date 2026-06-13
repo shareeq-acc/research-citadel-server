@@ -2,6 +2,7 @@ import { Injectable, OnModuleInit } from '@nestjs/common';
 import { NotificationType } from '@prisma/client';
 import {
   AiOperationCompletePayload,
+  ChatMentionPayload,
   EmailVerifiedPayload,
   InvitationRespondedPayload,
   InvitationSentPayload,
@@ -43,6 +44,10 @@ export class NotificationListener implements OnModuleInit {
     this.bus.on(NotificationEvents.AI_OPERATION_COMPLETE, (payload: AiOperationCompletePayload) => {
       void this.handleAiOperationComplete(payload);
     });
+
+    this.bus.on(NotificationEvents.CHAT_MENTION, (payload: ChatMentionPayload) => {
+      void this.handleChatMention(payload);
+    });
   }
 
   private async handleVaultMemberAdded(payload: VaultMemberAddedPayload): Promise<void> {
@@ -51,6 +56,7 @@ export class NotificationListener implements OnModuleInit {
       type: NotificationType.VAULT_ACTIVITY,
       title: 'Added to Vault',
       description: `${payload.addedByName} added you to "${payload.vaultName}".`,
+      alertCategory: 'securityAlerts',
       metadata: {
         vaultId: payload.vaultId,
         linkPath: `/vault/${payload.vaultId}`,
@@ -64,6 +70,7 @@ export class NotificationListener implements OnModuleInit {
       type: NotificationType.VAULT_ACTIVITY,
       title: 'Removed from Vault',
       description: `${payload.removedByName} removed you from "${payload.vaultName}".`,
+      alertCategory: 'securityAlerts',
       metadata: { vaultId: payload.vaultId },
     });
   }
@@ -74,6 +81,7 @@ export class NotificationListener implements OnModuleInit {
       type: NotificationType.INVITATION,
       title: 'Co-Author Invitation',
       description: `${payload.senderName} invited you to collaborate on "${payload.vaultName}" as ${payload.role.toLowerCase()}.`,
+      alertCategory: 'securityAlerts',
       metadata: {
         invitationId: payload.invitationId,
         vaultId: payload.vaultId,
@@ -93,6 +101,7 @@ export class NotificationListener implements OnModuleInit {
       type: NotificationType.INVITATION,
       title,
       description,
+      alertCategory: 'securityAlerts',
       metadata: {
         vaultId: payload.vaultId,
         linkPath: payload.accepted ? `/vault/${payload.vaultId}` : undefined,
@@ -106,6 +115,7 @@ export class NotificationListener implements OnModuleInit {
       type: NotificationType.SECURITY,
       title: 'Email Verified',
       description: 'Your email address has been confirmed. Collaborative editing is now enabled.',
+      alertCategory: 'securityAlerts',
       metadata: { linkPath: '/dashboard' },
     });
   }
@@ -128,11 +138,26 @@ export class NotificationListener implements OnModuleInit {
       type: NotificationType.AI_COMPLETE,
       title: titles[payload.operation],
       description: descriptions[payload.operation],
+      alertCategory: 'systemUpdates',
       metadata: {
         vaultId: payload.vaultId,
         sourceId: payload.sourceId,
         operation: payload.operation,
         linkPath: `/source/${payload.vaultId}/${payload.sourceId}`,
+      },
+    });
+  }
+
+  private async handleChatMention(payload: ChatMentionPayload): Promise<void> {
+    await this.notificationService.createAndPush({
+      userId: payload.mentionedUserId,
+      type: NotificationType.VAULT_ACTIVITY,
+      title: 'You were mentioned',
+      description: `${payload.senderName} mentioned you in "${payload.vaultName}": "${payload.messagePreview}"`,
+      alertCategory: 'chatMentions',
+      metadata: {
+        vaultId: payload.vaultId,
+        linkPath: `/dashboard?vault=${payload.vaultId}&tab=colloquium`,
       },
     });
   }

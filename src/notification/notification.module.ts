@@ -1,5 +1,6 @@
 import { Global, Module } from '@nestjs/common';
 import { CollaborationModule } from 'src/collaboration/collaboration.module';
+import { MailerModule } from 'src/mailer/mailer.module';
 import { PrismaService } from 'src/common/services/prisma.service';
 import { NotificationController } from './notification.controller';
 import { NotificationEventBus } from './notification-event.bus';
@@ -8,7 +9,7 @@ import { NotificationService } from './notification.service';
 
 @Global()
 @Module({
-  imports: [CollaborationModule],
+  imports: [CollaborationModule, MailerModule],
   controllers: [NotificationController],
   providers: [
     NotificationService,

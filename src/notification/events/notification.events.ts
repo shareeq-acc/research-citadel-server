@@ -6,6 +6,7 @@ export const NotificationEvents = {
   INVITATION_RESPONDED: 'notification.invitation_responded',
   EMAIL_VERIFIED: 'notification.email_verified',
   AI_OPERATION_COMPLETE: 'notification.ai_operation_complete',
+  CHAT_MENTION: 'notification.chat_mention',
 } as const;
 
 export type NotificationEventName =
@@ -52,4 +53,12 @@ export interface AiOperationCompletePayload {
   sourceId: string;
   sourceTitle: string;
   operation: 'SUMMARIZATION' | 'INSIGHTS' | 'EXTRACT_INDEX';
+}
+
+export interface ChatMentionPayload {
+  mentionedUserId: string;
+  vaultId: string;
+  vaultName: string;
+  senderName: string;
+  messagePreview: string;
 }

@@ -10,12 +10,19 @@ import { userSelect, UserSelect, completeUserSelect, CompleteUserSelect } from '
 import { GetAllUserResponse, CompleteUserProfileResponse } from './types';
 import { UpdateUserDto } from './dto/user.dto';
 import { UpgradePlanDto } from './dto/upgrade-plan.dto';
+import {
+  AlertPreferencesDto,
+  mergeAlertPreferences,
+  parseAlertPreferences,
+  UpdateAlertPreferencesDto,
+} from './dto/alert-preferences.dto';
 import { AiUsageService } from 'src/ai/services/ai-usage.service';
 import { AiUsageSummary } from 'src/ai/constants/ai-usage.constants';
 
-export type UserWithAiUsage = UserSelect & {
+export type UserWithAiUsage = Omit<UserSelect, 'alertPreferences'> & {
   plan: Plan;
   aiUsage: AiUsageSummary;
+  alertPreferences: AlertPreferencesDto;
 };
 
 @Injectable()
@@ -49,10 +56,12 @@ export class UserService {
     };
   }
 
-  private async enrichUserWithUsage(user: UserSelect & { plan?: Plan }): Promise<UserWithAiUsage> {
+  private async enrichUserWithUsage(user: UserSelect & { plan?: Plan; alertPreferences?: unknown }): Promise<UserWithAiUsage> {
     const plan = user.plan ?? Plan.FREE;
     const aiUsage = await this.aiUsageService.getUsageSummary(user.id, plan);
-    return { ...user, plan, aiUsage };
+    const alertPreferences = parseAlertPreferences(user.alertPreferences);
+    const { alertPreferences: _rawPrefs, ...rest } = user;
+    return { ...rest, plan, aiUsage, alertPreferences };
   }
 
   async getAllUsers(user: User, query?: QueryParams): Promise<ApiResponse<GetAllUserResponse>> {
@@ -126,7 +135,7 @@ export class UserService {
     try {
       const currentUser = await this.prismaService.user.findUnique({
         where: { id: user.id },
-        select: { ...userSelect, plan: true },
+        select: { ...userSelect, plan: true, alertPreferences: true },
       });
 
       if (!currentUser) throw throwError('User not found', HttpStatus.NOT_FOUND);
@@ -350,7 +359,7 @@ export class UserService {
       const updatedUser = await this.prismaService.user.update({
         where: { id: user.id },
         data: { plan },
-        select: { ...userSelect, plan: true },
+        select: { ...userSelect, plan: true, alertPreferences: true },
       });
 
       const userWithImage = await this.populateUserImages(updatedUser);
@@ -364,6 +373,39 @@ export class UserService {
     } catch (err) {
       this.logger.error('Failed to upgrade plan', err.stack, UserService.name);
       throw throwError(err.message || 'Failed to upgrade plan', err.status || HttpStatus.INTERNAL_SERVER_ERROR);
+    }
+  }
+
+  async updateAlertPreferences(
+    user: User,
+    dto: UpdateAlertPreferencesDto,
+  ): Promise<ApiResponse<AlertPreferencesDto>> {
+    try {
+      const existing = await this.prismaService.user.findUnique({
+        where: { id: user.id },
+        select: { alertPreferences: true },
+      });
+
+      if (!existing) throw throwError('User not found', HttpStatus.NOT_FOUND);
+
+      const merged = mergeAlertPreferences(existing.alertPreferences, dto);
+
+      await this.prismaService.user.update({
+        where: { id: user.id },
+        data: { alertPreferences: merged as object },
+      });
+
+      return {
+        message: 'Alert preferences updated successfully',
+        success: true,
+        data: merged,
+      };
+    } catch (err) {
+      this.logger.error('Failed to update alert preferences', err.stack, UserService.name);
+      throw throwError(
+        err.message || 'Failed to update alert preferences',
+        err.status || HttpStatus.INTERNAL_SERVER_ERROR,
+      );
     }
   }
 }

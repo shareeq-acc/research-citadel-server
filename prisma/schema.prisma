@@ -42,6 +42,9 @@ model User {
   isEmailVerified  Boolean @default(false)
   plan             Plan    @default(FREE)
 
+  // User-level email/in-app alert toggles (chatMentions, securityAlerts, systemUpdates)
+  alertPreferences Json @default("{}")
+
   lastLoginAt  DateTime?
   lastActiveAt DateTime?
 
