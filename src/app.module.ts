@@ -17,6 +17,7 @@ import { AiModule } from './ai/ai.module';
 import { ChatModule } from './chat/chat.module';
 import { InvitationModule } from './invitation/invitation.module';
 import { NotificationModule } from './notification/notification.module';
+import { PassportModule } from './passport/passport.module';
 
 @Module({
   imports: [
@@ -38,6 +39,7 @@ import { NotificationModule } from './notification/notification.module';
     AiModule,
     ChatModule,
     InvitationModule,
+    PassportModule,
   ],
   controllers: [AppController],
   providers: [AppService],

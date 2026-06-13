@@ -68,6 +68,7 @@ model User {
   sentInvitations      VaultInvitation[] @relation("InvitationSender")
   receivedInvitations  VaultInvitation[] @relation("InvitationReceiver")
   notifications        Notification[]
+  vaultPassports       VaultPassport[]
 
   @@index([name])
   @@index([email])
@@ -258,6 +259,7 @@ model Vault {
   chatMembers VaultChatMember[]
   chatMessages VaultChatMessage[]
   invitations  VaultInvitation[]  @relation("VaultInvitations")
+  passports    VaultPassport[]
 
   @@index([ownerId])
   @@index([createdAt])
@@ -741,4 +743,29 @@ model VaultInvitation {
   @@index([invitedUserId])
   @@index([token])
   @@index([expiresAt])
+}
+
+// ============================================================================
+// VAULT PASSPORT (Per-user identity card within a vault)
+// ============================================================================
+
+model VaultPassport {
+  id         String  @id @unique @default(uuid()) @db.Uuid
+  vaultId    String  @db.Uuid
+  userId     String  @db.Uuid
+  vaultAlias String? // Display name / username within this vault
+  role       String? // Specialization or title within the vault
+  motto      String? // Vault-specific motto; falls back to user motto when unset
+  barcode    String  @unique // Scannable verification code
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  vault Vault @relation(fields: [vaultId], references: [id], onDelete: Cascade)
+  user  User  @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([vaultId, userId])
+  @@index([vaultId])
+  @@index([userId])
+  @@index([barcode])
 }
