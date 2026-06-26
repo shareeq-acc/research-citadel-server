@@ -1,18 +1,18 @@
 services:
   postgres:
     image: postgres:16-alpine
-    container_name: hackathon-postgres-local
+    container_name: citadel-postgres-local
     restart: unless-stopped
     environment:
-      POSTGRES_USER: danish
+      POSTGRES_USER: citadel
       POSTGRES_PASSWORD: root
-      POSTGRES_DB: hackathon
+      POSTGRES_DB: citadel
     ports:
       - "5432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U danish"]
+      test: ["CMD-SHELL", "pg_isready -U citadel"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -21,9 +21,9 @@ services:
 
   adminer:
     image: adminer
-    container_name: hackathon-adminer-local
+    container_name: citadel-adminer-local
     restart: unless-stopped
-    ports:
+    ports:  
       - "8080:8080"
     environment:
       ADMINER_DEFAULT_SERVER: postgres
@@ -35,7 +35,7 @@ services:
 
   redis:
     image: redis:7-alpine
-    container_name: hackathon-redis-local
+    container_name: citadel-redis-local
     restart: unless-stopped
     ports:
       - "6379:6379"
