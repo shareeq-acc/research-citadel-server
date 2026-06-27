@@ -98,6 +98,7 @@ export class InvitationService {
         vaultName: vault.name,
         senderName: sender.name,
         role: dto.role,
+        token,
       });
 
       return {

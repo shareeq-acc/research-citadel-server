@@ -33,6 +33,7 @@ export interface InvitationSentPayload {
   vaultName: string;
   senderName: string;
   role: string;
+  token: string;
 }
 
 export interface InvitationRespondedPayload {

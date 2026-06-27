@@ -82,10 +82,11 @@ export class NotificationListener implements OnModuleInit {
       title: 'Co-Author Invitation',
       description: `${payload.senderName} invited you to collaborate on "${payload.vaultName}" as ${payload.role.toLowerCase()}.`,
       alertCategory: 'securityAlerts',
+      sendEmail: false,
       metadata: {
         invitationId: payload.invitationId,
         vaultId: payload.vaultId,
-        linkPath: '/invitations',
+        linkPath: `/invitation/${payload.token}`,
       },
     });
   }
