@@ -50,6 +50,24 @@ services:
     networks:
       - hackathon-local-network
 
+  server:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: citadel-server-local
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    env_file:
+      - .env.prod
+    networks:
+      - hackathon-local-network
+
 volumes:
   postgres_data:
     driver: local

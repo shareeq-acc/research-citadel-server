@@ -81,4 +81,5 @@ ENV NODE_ENV=production
 EXPOSE 8000
 
 # Try dist/main.js first, fallback to dist/src/main.js if needed
-CMD ["sh", "-c", "if [ -f dist/main.js ]; then node dist/main.js; elif [ -f dist/src/main.js ]; then node dist/src/main.js; else echo 'Error: main.js not found in dist/' && ls -la dist/ && exit 1; fi"]
+CMD ["sh", "-c", "pnpm prisma migrate deploy && if [ -f dist/main.js ]; then node dist/main.js; elif [ -f dist/src/main.js ]; then node dist/src/main.js; else echo 'Error: main.js not found in dist/' && ls -la dist/ && exit 1; fi"]
+
