@@ -47,8 +47,12 @@ before_ref="$(git rev-parse HEAD 2>/dev/null || true)"
 if [ -d .git ]; then
     if [ -n "$(git status --porcelain 2>/dev/null)" ]; then
         log "working tree has local changes — not pulling the repository"
-    elif ! git pull --quiet --ff-only 2>/dev/null; then
-        log "git pull failed — continuing with the files already on disk"
+    elif ! git pull --quiet --ff-only 2>&1; then
+        # Loud, and the error kept rather than swallowed. Carrying on quietly
+        # means the compose file silently stops updating while the images keep
+        # going — the exact split-brain the ref comparison above exists to
+        # catch, hidden behind a line that reads like a routine notice.
+        log "GIT PULL FAILED — compose files are NOT being updated"
     fi
 fi
 
