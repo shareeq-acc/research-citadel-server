@@ -1,0 +1,126 @@
+# Research Citadel in production, both halves of it.
+#
+# The client and the server live in separate repositories and build separate
+# images, but they are one deployment, so one compose file runs them. It lives
+# here because this is the repository that owns the database.
+#
+# Nothing publishes a port. The shared Caddy on the server routes
+# `citadel.shareeq.xyz` to these containers by name over the `edge` network:
+#
+#     /api/v1/*    -> citadel-server:8000
+#     /socket.io/* -> citadel-server:8000   (the websockets)
+#     /docs*       -> citadel-server:8000   (Swagger)
+#     everything   -> citadel-client:3000
+#
+# Front end and API deliberately share one hostname. The login is a cookie, and
+# a browser only returns a cookie to the origin it came from — split them over
+# two subdomains and it needs cross-origin cookie settings that fail quietly in
+# Safari and in private windows.
+#
+#   docker compose -f docker-compose.prod.yml up -d
+
+name: research-citadel
+
+services:
+  client:
+    # Built by CI in the client repository. The API URL is compiled into this
+    # image, so an image is specific to the host it was built for.
+    image: ${CLIENT_IMAGE:-ghcr.io/shareeq-acc/research-citadel-client:main}
+    container_name: citadel-client
+    restart: unless-stopped
+    depends_on:
+      - server
+    networks:
+      - default
+      - edge
+    mem_limit: 256m
+
+  server:
+    image: ${SERVER_IMAGE:-ghcr.io/shareeq-acc/research-citadel-server:main}
+    container_name: citadel-server
+    restart: unless-stopped
+    environment:
+      PORT: 8000
+      DATABASE_URL: postgresql://${DB_USER}:${DB_PASSWORD}@postgres:5432/${DB_NAME}?schema=public
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      # Same origin as the front end, so this is really a belt-and-braces
+      # setting: with one hostname there is no cross-origin request to allow.
+      CORS_ORIGINS: ${PUBLIC_URL:-https://citadel.shareeq.xyz}
+      BASE_DOMAIN: ${PUBLIC_URL:-https://citadel.shareeq.xyz}
+      JWT_SECRET: ${JWT_SECRET:?set JWT_SECRET in .env}
+      # Read with getOrThrow, so the app refuses to start without it rather
+      # than defaulting to something. Found by running the image, not reading.
+      JWT_EXPIRY: ${JWT_EXPIRY:-7d}
+      GEMINI_API_KEY: ${GEMINI_API_KEY}
+      EMAIL: ${EMAIL}
+      EMAIL_FROM: ${EMAIL_FROM}
+      EMAIL_PASSWORD: ${EMAIL_PASSWORD}
+      CLOUDINARY_CLOUD_NAME: ${CLOUDINARY_CLOUD_NAME}
+      CLOUDINARY_API_KEY: ${CLOUDINARY_API_KEY}
+      CLOUDINARY_API_SECRET: ${CLOUDINARY_API_SECRET}
+      # File storage, on Cloudflare R2. StorageService checks all five at
+      # construction and refuses to start without them, so the app will not
+      # boot with these blank — which is better than discovering it on the
+      # first upload, but means they are not optional.
+      R2_BUCKET_NAME: ${R2_BUCKET_NAME:?set R2_BUCKET_NAME in .env}
+      R2_ACCOUNT_ID: ${R2_ACCOUNT_ID:?set R2_ACCOUNT_ID in .env}
+      R2_ACCESS_KEY_ID: ${R2_ACCESS_KEY_ID:?set R2_ACCESS_KEY_ID in .env}
+      R2_SECRET_ACCESS_KEY: ${R2_SECRET_ACCESS_KEY:?set R2_SECRET_ACCESS_KEY in .env}
+      R2_PUBLIC_URL: ${R2_PUBLIC_URL:?set R2_PUBLIC_URL in .env}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - default
+      - edge
+    mem_limit: 512m
+
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${DB_USER:?set DB_USER in .env}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:?set DB_PASSWORD in .env}
+      POSTGRES_DB: ${DB_NAME:?set DB_NAME in .env}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    # No published port. The dev compose publishes 5432, which on a shared
+    # server is both an open database and a fight with the two other projects
+    # that want the same number. Only the server container needs it, and it
+    # reaches it by name.
+    mem_limit: 384m
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    command: redis-server --appendonly yes
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    mem_limit: 128m
+
+# Adminer is deliberately absent. The dev compose publishes it on 8088 — a
+# database console, on a public IP, with no password of its own. If you want it
+# on the server, add it bound to 127.0.0.1 and reach it over Tailscale.
+
+volumes:
+  postgres_data:
+  redis_data:
+
+networks:
+  default:
+  # `docker network create edge`, once, on the server.
+  edge:
+    external: true

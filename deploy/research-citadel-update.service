@@ -1,0 +1,12 @@
+[Unit]
+Description=Deploy whatever CI last built for research-citadel
+Documentation=https://github.com/shareeq-acc/research-citadel/blob/main/docs/deploy.md
+After=docker.service
+Requires=docker.service
+
+[Service]
+Type=oneshot
+Environment=PROJECT_DIR=/srv/research-citadel
+ExecStart=/usr/local/bin/research-citadel-update
+# A deploy that hangs must not block the next one forever.
+TimeoutStartSec=900

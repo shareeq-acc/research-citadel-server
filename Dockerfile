@@ -56,7 +56,12 @@ COPY package.json pnpm-lock.yaml ./
 # Skip postinstall (prisma generate) - we run it explicitly after copying prisma
 RUN pnpm install --prod --ignore-scripts
 
-RUN pnpm add prisma@latest
+# Pinned, not `@latest`. This said `prisma@latest`, which meant the image
+# built against whatever Prisma had published that morning — and the day a
+# newer major dropped the `generate` command, every build started failing with
+# "No command registered for `generate`" on a Dockerfile nobody had touched.
+# The CLI has to match the client the code was compiled against anyway.
+RUN pnpm add prisma@7.3.0
 
 COPY prisma.config.ts ./
 COPY prisma ./prisma
